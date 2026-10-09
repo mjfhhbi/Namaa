@@ -13,10 +13,12 @@ import {
   fetchStoreSettings, 
   createOrder, 
   updateOrderStatus, 
+  deleteOrder,
+  clearAllOrders,
   saveProduct, 
   deleteProduct, 
-  clearAllProducts,
-  resetSampleProducts,
+  clearAllProducts, 
+  resetSampleProducts, 
   updateStoreSettings 
 } from './services/storeService';
 import { testFirestoreConnection } from './firebase';
@@ -151,6 +153,20 @@ export default function App() {
       prev.map(o => o.id === orderId ? { ...o, status, ...extras, updatedAt: new Date().toISOString() } : o)
     );
     showToast('وضعیت سفارش بروزرسانی شد.');
+  };
+
+  // Admin delete single order
+  const handleDeleteOrder = async (orderId: string) => {
+    await deleteOrder(orderId);
+    setOrders(prev => prev.filter(o => o.id !== orderId));
+    showToast('سفارش مورد نظر حذف گردید.');
+  };
+
+  // Admin clear all orders (clean store start)
+  const handleClearAllOrders = async () => {
+    await clearAllOrders();
+    setOrders([]);
+    showToast('تمامی سفارشات حذف شدند.');
   };
 
   // Admin save/edit product
@@ -424,6 +440,8 @@ export default function App() {
         products={products}
         settings={settings}
         onUpdateOrderStatus={handleUpdateOrderStatus}
+        onDeleteOrder={handleDeleteOrder}
+        onClearAllOrders={handleClearAllOrders}
         onSaveProduct={handleSaveProduct}
         onDeleteProduct={handleDeleteProduct}
         onClearAllProducts={handleClearAllProducts}

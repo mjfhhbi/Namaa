@@ -17,6 +17,7 @@ import {
   Check
 } from 'lucide-react';
 import { searchOrder, updateOrderStatus } from '../services/storeService';
+import { compressImage } from '../utils/imageCompressor';
 
 interface OrderTrackingModalProps {
   isOpen: boolean;
@@ -62,6 +63,9 @@ export const OrderTrackingModal: React.FC<OrderTrackingModalProps> = ({
   const [lateReceipt, setLateReceipt] = useState('');
   const [lateCardLast4, setLateCardLast4] = useState('');
   const [isUpdatingReceipt, setIsUpdatingReceipt] = useState(false);
+  const [lateSuccessMessage, setLateSuccessMessage] = useState<string | null>(null);
+  const [lateError, setLateError] = useState<string | null>(null);
+  const [isCompressingLate, setIsCompressingLate] = useState(false);
 
   if (!isOpen) return null;
 
@@ -76,34 +80,50 @@ export const OrderTrackingModal: React.FC<OrderTrackingModalProps> = ({
     setLoading(false);
   };
 
-  const handleLateUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleLateUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setLateReceipt(reader.result as string);
-      };
-      reader.readAsDataURL(file);
+      setLateError(null);
+      if (file.size > 8 * 1024 * 1024) {
+        setLateError('حجم فایل نباید بیشتر از ۸ مگابایت باشد.');
+        return;
+      }
+      try {
+        setIsCompressingLate(true);
+        const compressed = await compressImage(file, 900, 0.75);
+        setLateReceipt(compressed);
+      } catch (err: any) {
+        setLateError(err?.message || 'خطا در فشرده‌سازی تصویر.');
+      } finally {
+        setIsCompressingLate(false);
+      }
     }
   };
 
   const handleSaveLateReceipt = async () => {
     if (!order) return;
     setIsUpdatingReceipt(true);
-    await updateOrderStatus(order.id, 'paid_pending_approval', {
-      receiptImage: lateReceipt || order.receiptImage,
-      cardLast4: lateCardLast4.trim() || order.cardLast4,
-    });
-    const updated: Order = {
-      ...order,
-      receiptImage: lateReceipt || order.receiptImage,
-      cardLast4: lateCardLast4.trim() || order.cardLast4,
-      status: 'paid_pending_approval',
-    };
-    setOrder(updated);
-    if (onOrderUpdated) onOrderUpdated(updated);
-    setIsUpdatingReceipt(false);
-    alert('اطلاعات پرداخت با موفقیت ثبت شد و برای ادمین ارسال گردید.');
+    setLateError(null);
+    try {
+      await updateOrderStatus(order.id, 'paid_pending_approval', {
+        receiptImage: lateReceipt || order.receiptImage,
+        cardLast4: lateCardLast4.trim() || order.cardLast4,
+      });
+      const updated: Order = {
+        ...order,
+        receiptImage: lateReceipt || order.receiptImage,
+        cardLast4: lateCardLast4.trim() || order.cardLast4,
+        status: 'paid_pending_approval',
+      };
+      setOrder(updated);
+      if (onOrderUpdated) onOrderUpdated(updated);
+      setLateSuccessMessage('اطلاعات پرداخت با موفقیت ثبت شد و برای ادمین ارسال گردید.');
+      setTimeout(() => setLateSuccessMessage(null), 5000);
+    } catch (e: any) {
+      setLateError('خطا در ثبت اطلاعات.');
+    } finally {
+      setIsUpdatingReceipt(false);
+    }
   };
 
   const getStepIndex = (status: OrderStatus) => {
@@ -304,13 +324,34 @@ export const OrderTrackingModal: React.FC<OrderTrackingModalProps> = ({
                       className="text-xs file:mr-2 file:py-1.5 file:px-3 file:rounded-xl file:border-0 file:bg-[#163826] file:text-white"
                     />
                   </div>
+                  {isCompressingLate && (
+                    <div className="text-xs text-[#163826] font-bold flex items-center gap-1">
+                      <div className="w-3.5 h-3.5 border-2 border-[#163826] border-t-transparent rounded-full animate-spin" />
+                      <span>در حال بهینه‌سازی و فشرده‌سازی تصویر فیش...</span>
+                    </div>
+                  )}
+
+                  {lateError && (
+                    <p className="text-xs text-red-600 font-bold flex items-center gap-1">
+                      <AlertCircle className="w-3.5 h-3.5" />
+                      {lateError}
+                    </p>
+                  )}
+
+                  {lateSuccessMessage && (
+                    <p className="text-xs text-emerald-700 font-bold bg-emerald-50 p-2.5 rounded-xl border border-emerald-200 flex items-center gap-1">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                      {lateSuccessMessage}
+                    </p>
+                  )}
+
                   {(lateReceipt || lateCardLast4) && (
                     <button
                       onClick={handleSaveLateReceipt}
-                      disabled={isUpdatingReceipt}
-                      className="w-full py-2 bg-[#163826] hover:bg-[#0E2619] text-white rounded-xl text-xs font-bold transition-all"
+                      disabled={isUpdatingReceipt || isCompressingLate}
+                      className="w-full py-2 bg-[#163826] hover:bg-[#0E2619] disabled:bg-gray-400 text-white rounded-xl text-xs font-bold transition-all"
                     >
-                      {isUpdatingReceipt ? 'در حال ذخیره...' : 'ثبت فیش واریز'}
+                      {isUpdatingReceipt ? 'در حال ثبت...' : 'ثبت فیش واریز'}
                     </button>
                   )}
                 </div>

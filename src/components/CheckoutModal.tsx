@@ -19,6 +19,7 @@ import {
   AlertCircle
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
+import { compressImage } from '../utils/imageCompressor';
 
 interface CheckoutModalProps {
   isOpen: boolean;
@@ -52,6 +53,8 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
   const [cardLast4, setCardLast4] = useState('');
   const [paymentReference, setPaymentReference] = useState('');
   const [receiptImage, setReceiptImage] = useState<string>('');
+  const [isCompressing, setIsCompressing] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [createdOrder, setCreatedOrder] = useState<Order | null>(null);
 
@@ -68,18 +71,23 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
     setTimeout(() => setCopiedField(null), 2500);
   };
 
-  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      if (file.size > 5 * 1024 * 1024) {
-        alert('حجم عکس رسید نباید بیشتر از ۵ مگابایت باشد.');
+      setUploadError(null);
+      if (file.size > 8 * 1024 * 1024) {
+        setUploadError('حجم فایل انتخاب شده نباید بیشتر از ۸ مگابایت باشد.');
         return;
       }
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setReceiptImage(reader.result as string);
-      };
-      reader.readAsDataURL(file);
+      try {
+        setIsCompressing(true);
+        const compressedBase64 = await compressImage(file, 900, 0.75);
+        setReceiptImage(compressedBase64);
+      } catch (err: any) {
+        setUploadError(err?.message || 'خطا در بارگذاری و فشرده‌سازی تصویر.');
+      } finally {
+        setIsCompressing(false);
+      }
     }
   };
 
@@ -467,21 +475,39 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                     </button>
                   </div>
                 ) : (
-                  <label className="border-2 border-dashed border-[#D5C6AC] hover:border-[#163826] bg-[#FAF8F3] hover:bg-[#F2ECE0] p-4 rounded-2xl flex flex-col items-center justify-center cursor-pointer transition-all">
-                    <Upload className="w-6 h-6 text-[#163826] mb-1.5" />
-                    <span className="text-xs font-bold text-[#163826]">
-                      کلیک برای انتخاب یا کشیدن تصویر رسید
-                    </span>
-                    <span className="text-[10px] text-gray-500 mt-0.5">
-                      فرمت‌های JPG، PNG (حداکثر ۵ مگابایت)
-                    </span>
-                    <input
-                      type="file"
-                      accept="image/*"
-                      onChange={handleImageUpload}
-                      className="hidden"
-                    />
-                  </label>
+                  <div>
+                    <label className="border-2 border-dashed border-[#D5C6AC] hover:border-[#163826] bg-[#FAF8F3] hover:bg-[#F2ECE0] p-4 rounded-2xl flex flex-col items-center justify-center cursor-pointer transition-all">
+                      {isCompressing ? (
+                        <div className="py-2 flex flex-col items-center gap-1.5">
+                          <div className="w-5 h-5 border-2 border-[#163826] border-t-transparent rounded-full animate-spin" />
+                          <span className="text-xs font-bold text-[#163826]">در حال آماده‌سازی و بهینه‌سازی تصویر...</span>
+                        </div>
+                      ) : (
+                        <>
+                          <Upload className="w-6 h-6 text-[#163826] mb-1.5" />
+                          <span className="text-xs font-bold text-[#163826]">
+                            کلیک برای انتخاب تصویر فیش یا اسکرین‌شات
+                          </span>
+                          <span className="text-[10px] text-gray-500 mt-0.5">
+                            پشتیبانی از انواع فرمت‌های تصویر (دوربین موبایل و گالری)
+                          </span>
+                        </>
+                      )}
+                      <input
+                        type="file"
+                        accept="image/*"
+                        disabled={isCompressing}
+                        onChange={handleImageUpload}
+                        className="hidden"
+                      />
+                    </label>
+                    {uploadError && (
+                      <p className="text-xs text-red-600 mt-1.5 font-bold flex items-center gap-1">
+                        <AlertCircle className="w-3.5 h-3.5 flex-shrink-0" />
+                        {uploadError}
+                      </p>
+                    )}
+                  </div>
                 )}
               </div>
 

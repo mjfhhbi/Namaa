@@ -15,6 +15,7 @@ import { DEFAULT_PRODUCTS, DEFAULT_SETTINGS, SAMPLE_ORDERS } from '../data/defau
 const LS_PRODUCTS_KEY = 'nama_store_products_v2';
 const LS_ORDERS_KEY = 'nama_store_orders_v2';
 const LS_SETTINGS_KEY = 'nama_store_settings_v2';
+const LS_CATALOG_INIT_FLAG = 'nama_catalog_initialized_flag_v2';
 
 // Local storage helpers for immediate responsive UI and fallback
 export function getLocalSettings(): StoreSettings {
@@ -38,9 +39,9 @@ export function saveLocalSettings(settings: StoreSettings): void {
 export function getLocalProducts(): Product[] {
   try {
     const raw = localStorage.getItem(LS_PRODUCTS_KEY);
-    if (raw) {
+    if (raw !== null) {
       const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      if (Array.isArray(parsed)) return parsed;
     }
   } catch (e) {
     console.error('Failed to read products from localStorage', e);
@@ -51,6 +52,7 @@ export function getLocalProducts(): Product[] {
 export function saveLocalProducts(products: Product[]): void {
   try {
     localStorage.setItem(LS_PRODUCTS_KEY, JSON.stringify(products));
+    localStorage.setItem(LS_CATALOG_INIT_FLAG, 'true');
   } catch (e) {
     console.error('Failed to save products to localStorage', e);
   }
@@ -59,14 +61,14 @@ export function saveLocalProducts(products: Product[]): void {
 export function getLocalOrders(): Order[] {
   try {
     const raw = localStorage.getItem(LS_ORDERS_KEY);
-    if (raw) {
+    if (raw !== null) {
       const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      if (Array.isArray(parsed)) return parsed;
     }
   } catch (e) {
     console.error('Failed to read orders from localStorage', e);
   }
-  return SAMPLE_ORDERS;
+  return [];
 }
 
 export function saveLocalOrders(orders: Order[]): void {
@@ -127,10 +129,18 @@ export async function fetchProducts(): Promise<Product[]> {
       saveLocalProducts(list);
       return list;
     } else {
-      // Seed initial products to Firestore
-      const initial = getLocalProducts();
+      // If catalog was already initialized and now empty, admin intentionally cleared all products
+      const isAlreadyInit = localStorage.getItem(LS_CATALOG_INIT_FLAG);
+      if (isAlreadyInit === 'true') {
+        saveLocalProducts([]);
+        return [];
+      }
+
+      // Seed initial products to Firestore on very first run
+      const initial = DEFAULT_PRODUCTS;
+      saveLocalProducts(initial);
       for (const prod of initial) {
-        await setDoc(doc(db, path, prod.id), prod);
+        await setDoc(doc(db, path, prod.id), prod).catch(() => {});
       }
       return initial;
     }
@@ -180,6 +190,7 @@ export async function deleteProduct(productId: string): Promise<void> {
 export async function clearAllProducts(): Promise<void> {
   const current = getLocalProducts();
   saveLocalProducts([]);
+  localStorage.setItem(LS_CATALOG_INIT_FLAG, 'true');
 
   const path = 'products';
   try {
@@ -194,6 +205,7 @@ export async function clearAllProducts(): Promise<void> {
 // Restore default sample products
 export async function resetSampleProducts(): Promise<Product[]> {
   saveLocalProducts(DEFAULT_PRODUCTS);
+  localStorage.setItem(LS_CATALOG_INIT_FLAG, 'true');
   const path = 'products';
   try {
     for (const prod of DEFAULT_PRODUCTS) {
@@ -219,16 +231,41 @@ export async function fetchOrders(): Promise<Order[]> {
       saveLocalOrders(list);
       return list;
     } else {
-      // Seed initial sample orders
-      const samples = getLocalOrders();
-      for (const ord of samples) {
-        await setDoc(doc(db, path, ord.id), ord);
-      }
-      return samples;
+      // Empty order list in Firestore
+      const cached = getLocalOrders();
+      return cached;
     }
   } catch (error) {
     console.warn('Firestore orders fetch notice, using cached orders:', error);
     return getLocalOrders();
+  }
+}
+
+// Delete an order permanently
+export async function deleteOrder(orderId: string): Promise<void> {
+  const current = getLocalOrders();
+  saveLocalOrders(current.filter(o => o.id !== orderId));
+
+  const path = 'orders';
+  try {
+    await deleteDoc(doc(db, path, orderId));
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, `${path}/${orderId}`);
+  }
+}
+
+// Clear all orders (for starting clean production store)
+export async function clearAllOrders(): Promise<void> {
+  const current = getLocalOrders();
+  saveLocalOrders([]);
+
+  const path = 'orders';
+  try {
+    for (const ord of current) {
+      await deleteDoc(doc(db, path, ord.id)).catch(() => {});
+    }
+  } catch (error) {
+    console.warn('Notice while clearing orders:', error);
   }
 }
 

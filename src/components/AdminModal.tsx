@@ -25,10 +25,12 @@ import {
   Sparkles,
   Type,
   Image as ImageIcon,
-  Printer
+  Printer,
+  Upload
 } from 'lucide-react';
 import { sendNtfyNotification } from '../services/storeService';
 import { PRESET_IMAGE_OPTIONS } from '../data/productImages';
+import { compressImage } from '../utils/imageCompressor';
 
 interface AdminModalProps {
   isOpen: boolean;
@@ -37,6 +39,8 @@ interface AdminModalProps {
   products: Product[];
   settings: StoreSettings;
   onUpdateOrderStatus: (orderId: string, status: OrderStatus, extras?: { trackingCode?: string }) => void;
+  onDeleteOrder?: (orderId: string) => void;
+  onClearAllOrders?: () => void;
   onSaveProduct: (product: Product) => void;
   onDeleteProduct: (productId: string) => void;
   onClearAllProducts: () => void;
@@ -51,6 +55,8 @@ export const AdminModal: React.FC<AdminModalProps> = ({
   products,
   settings,
   onUpdateOrderStatus,
+  onDeleteOrder,
+  onClearAllOrders,
   onSaveProduct,
   onDeleteProduct,
   onClearAllProducts,
@@ -67,6 +73,8 @@ export const AdminModal: React.FC<AdminModalProps> = ({
   const [editingProduct, setEditingProduct] = useState<Partial<Product> | null>(null);
   const [isNewProduct, setIsNewProduct] = useState(false);
   const [productSearch, setProductSearch] = useState('');
+  const [productFormError, setProductFormError] = useState<string | null>(null);
+  const [isUploadingProductImage, setIsUploadingProductImage] = useState(false);
 
   // Settings State Form
   const [formSettings, setFormSettings] = useState<StoreSettings>({ ...settings });
@@ -76,6 +84,16 @@ export const AdminModal: React.FC<AdminModalProps> = ({
 
   // Invoice modal
   const [invoiceOrder, setInvoiceOrder] = useState<Order | null>(null);
+  const [receiptLightboxUrl, setReceiptLightboxUrl] = useState<string | null>(null);
+
+  // In-app Confirmation Modal (replaces window.confirm)
+  const [confirmModal, setConfirmModal] = useState<{
+    title: string;
+    message: string;
+    confirmLabel?: string;
+    isDanger?: boolean;
+    onConfirm: () => void;
+  } | null>(null);
 
   if (!isOpen) return null;
 
@@ -126,10 +144,31 @@ export const AdminModal: React.FC<AdminModalProps> = ({
     setTimeout(() => setSaveSuccessMessage(false), 3000);
   };
 
+  const handleProductImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      setProductFormError(null);
+      if (file.size > 8 * 1024 * 1024) {
+        setProductFormError('حجم فایل تصویر نباید بیشتر از ۸ مگابایت باشد.');
+        return;
+      }
+      try {
+        setIsUploadingProductImage(true);
+        const compressed = await compressImage(file, 900, 0.8);
+        setEditingProduct(prev => prev ? { ...prev, image: compressed } : { image: compressed });
+      } catch (err: any) {
+        setProductFormError('خطا در بارگذاری تصویر محصول.');
+      } finally {
+        setIsUploadingProductImage(false);
+      }
+    }
+  };
+
   const handleProductSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    setProductFormError(null);
     if (!editingProduct?.name || !editingProduct?.price) {
-      alert('نام و قیمت محصول الزامی است');
+      setProductFormError('نام و قیمت محصول الزامی است');
       return;
     }
     const finalProduct: Product = {
@@ -424,10 +463,27 @@ export const AdminModal: React.FC<AdminModalProps> = ({
               {/* TAB 2: ORDERS MANAGEMENT */}
               {activeTab === 'orders' && (
                 <div className="space-y-4">
-                  <div className="flex items-center justify-between">
+                  <div className="flex items-center justify-between flex-wrap gap-2">
                     <h4 className="font-black text-[#231709] text-base">
                       لیست سفارشات فروشگاه ({orders.length})
                     </h4>
+                    {orders.length > 0 && onClearAllOrders && (
+                      <button
+                        onClick={() => {
+                          setConfirmModal({
+                            title: 'پاکسازی تمامی سفارشات',
+                            message: 'آیا از حذف تمامی سفارشات از دیتابیس اطمینان دارید؟ این عمل جهت راه‌اندازی فروشگاه واقعی و حذف سفارشات تستی کاربرد دارد.',
+                            confirmLabel: 'بله، همه سفارش‌ها را حذف کن',
+                            isDanger: true,
+                            onConfirm: () => onClearAllOrders(),
+                          });
+                        }}
+                        className="px-3 py-1.5 rounded-xl bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 text-xs font-bold transition-all flex items-center gap-1"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                        <span>پاکسازی سفارشات (شروع فروشگاه سفید)</span>
+                      </button>
+                    )}
                   </div>
 
                   <div className="bg-white rounded-3xl border border-[#E7DDC9] overflow-hidden shadow-xs divide-y divide-[#F0E6D5]">
@@ -506,19 +562,18 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                                 src={ord.receiptImage} 
                                 alt="فیش واریزی" 
                                 className="w-14 h-14 rounded-lg object-cover border cursor-pointer hover:scale-105 transition-transform"
-                                onClick={() => window.open(ord.receiptImage, '_blank')}
+                                onClick={() => setReceiptLightboxUrl(ord.receiptImage!)}
                                 title="کلیک برای مشاهده اندازه اصلی فیش"
                               />
                               <div className="text-xs text-emerald-900">
                                 <span className="font-bold block">تصویر فیش واریزی ارسال شده توسط خریدار</span>
-                                <a 
-                                  href={ord.receiptImage} 
-                                  target="_blank" 
-                                  rel="noopener noreferrer"
-                                  className="text-emerald-700 underline text-[11px] mt-0.5 inline-block"
+                                <button 
+                                  type="button"
+                                  onClick={() => setReceiptLightboxUrl(ord.receiptImage!)}
+                                  className="text-emerald-700 underline text-[11px] mt-0.5 inline-block font-semibold hover:text-emerald-900 cursor-pointer"
                                 >
-                                  مشاهده تصویر کامل فیش ←
-                                </a>
+                                  مشاهده و بزرگنمایی تصویر فیش ←
+                                </button>
                               </div>
                             </div>
                           )}
@@ -573,6 +628,24 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                             >
                               لغو سفارش
                             </button>
+
+                            {onDeleteOrder && (
+                              <button
+                                onClick={() => {
+                                  setConfirmModal({
+                                    title: 'حذف سفارش',
+                                    message: `آیا از حذف دائم سفارش «${ord.id}» اطمینان دارید؟`,
+                                    confirmLabel: 'بله، حذف کن',
+                                    isDanger: true,
+                                    onConfirm: () => onDeleteOrder(ord.id),
+                                  });
+                                }}
+                                className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all"
+                                title="حذف دائمی این سفارش"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            )}
                           </div>
                         </div>
                       ))
@@ -602,12 +675,17 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                     <div className="flex flex-wrap items-center gap-2">
                       {/* 1-Click Clear All Products requested by user */}
                       <button
+                        type="button"
                         onClick={() => {
-                          if (confirm('⚠️ آیا از حذف یکجای تمامی محصولات اطمینان دارید؟ تمام محصولات کاتالوگ پاک خواهند شد.')) {
-                            onClearAllProducts();
-                          }
+                          setConfirmModal({
+                            title: 'خالی کردن کاتالوگ محصولات',
+                            message: '⚠️ آیا از حذف یکجای تمامی محصولات اطمینان دارید؟ تمام محصولات کاتالوگ پاک خواهند شد و می‌توانید محصولات اختصاصی خود را وارد نمایید.',
+                            confirmLabel: 'بله، همه محصولات را پاک کن',
+                            isDanger: true,
+                            onConfirm: () => onClearAllProducts(),
+                          });
                         }}
-                        className="px-3 py-2 rounded-xl bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 text-xs font-bold transition-all flex items-center gap-1"
+                        className="px-3 py-2 rounded-xl bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 text-xs font-bold transition-all flex items-center gap-1 cursor-pointer"
                         title="خالی کردن کامل کاتالوگ محصولات"
                       >
                         <Trash2 className="w-3.5 h-3.5 text-red-600" />
@@ -616,12 +694,17 @@ export const AdminModal: React.FC<AdminModalProps> = ({
 
                       {/* 1-Click Restore Default Demo Products */}
                       <button
+                        type="button"
                         onClick={() => {
-                          if (confirm('آیا مایلید ۱۲ محصول نمونه پیش‌فرض با عکس‌های باکیفیت و خواص بازنشانی شوند؟')) {
-                            onResetSampleProducts();
-                          }
+                          setConfirmModal({
+                            title: 'بازنشانی محصولات نمونه',
+                            message: 'آیا مایلید ۱۲ محصول نمونه پیش‌فرض ناما با عکس‌های باکیفیت و خواص درمانی بازنشانی شوند؟',
+                            confirmLabel: 'بله، بازنشانی کن',
+                            isDanger: false,
+                            onConfirm: () => onResetSampleProducts(),
+                          });
                         }}
-                        className="px-3 py-2 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 text-xs font-bold transition-all flex items-center gap-1"
+                        className="px-3 py-2 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 text-xs font-bold transition-all flex items-center gap-1 cursor-pointer"
                         title="بازنشانی محصولات نمونه"
                       >
                         <RotateCcw className="w-3.5 h-3.5 text-amber-600" />
@@ -669,6 +752,13 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                       </div>
 
                       <form onSubmit={handleProductSubmit} className="space-y-4">
+                        {productFormError && (
+                          <div className="bg-red-50 border border-red-200 text-red-700 p-2.5 rounded-xl text-xs font-bold flex items-center gap-1.5 animate-in fade-in">
+                            <AlertCircle className="w-4 h-4 text-red-600 flex-shrink-0" />
+                            <span>{productFormError}</span>
+                          </div>
+                        )}
+
                         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                           <div>
                             <label className="block text-xs font-bold text-gray-700 mb-1">نام محصول *</label>
@@ -743,19 +833,40 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                           </div>
                         </div>
 
-                        {/* Image URL with Preset Picker */}
-                        <div className="space-y-2">
+                        {/* Image URL with Preset Picker & Direct File Upload */}
+                        <div className="space-y-2.5">
                           <label className="block text-xs font-bold text-gray-700">
-                            تصویر محصول (آدرس URL یا انتخاب از عکس‌های آماده و باکیفیت)
+                            تصویر محصول (آپلود عکس از دستگاه، لینک اینترنتی یا انتخاب از آرشیو عکس‌های باکیفیت)
                           </label>
-                          <input
-                            type="text"
-                            dir="ltr"
-                            value={editingProduct.image || ''}
-                            onChange={(e) => setEditingProduct({ ...editingProduct, image: e.target.value })}
-                            placeholder="https://..."
-                            className="w-full bg-[#FAF8F3] border rounded-xl px-3 py-2 text-xs font-mono"
-                          />
+
+                          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                            {editingProduct.image && (
+                              <div className="relative w-14 h-14 rounded-xl overflow-hidden border border-gray-300 flex-shrink-0 bg-gray-100">
+                                <img src={editingProduct.image} alt="پیش‌نمایش" className="w-full h-full object-cover" />
+                              </div>
+                            )}
+
+                            <label className="flex-1 border border-dashed border-[#D5C6AC] hover:border-[#163826] bg-[#FAF8F3] hover:bg-[#F2ECE0] px-3 py-2 rounded-xl flex items-center justify-center gap-2 cursor-pointer transition-all text-xs font-bold text-[#163826]">
+                              <Upload className="w-4 h-4" />
+                              <span>{isUploadingProductImage ? 'در حال بهینه‌سازی عکس...' : 'آپلود عکس اختصاصی از گوشی یا کامپیوتر'}</span>
+                              <input
+                                type="file"
+                                accept="image/*"
+                                disabled={isUploadingProductImage}
+                                onChange={handleProductImageUpload}
+                                className="hidden"
+                              />
+                            </label>
+
+                            <input
+                              type="text"
+                              dir="ltr"
+                              value={editingProduct.image || ''}
+                              onChange={(e) => setEditingProduct({ ...editingProduct, image: e.target.value })}
+                              placeholder="یا وارد کردن آدرس مستقیم عکس..."
+                              className="flex-1 bg-[#FAF8F3] border rounded-xl px-3 py-2 text-xs font-mono"
+                            />
+                          </div>
 
                           {/* Clickable Quick Gallery of High-Res Product Photos */}
                           <div className="bg-[#FAF6EE] p-3 rounded-2xl border border-[#E8DEC9]">
@@ -917,12 +1028,17 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                             <Edit3 className="w-3.5 h-3.5" />
                           </button>
                           <button
+                            type="button"
                             onClick={() => {
-                              if (confirm(`آیا از حذف محصول «${p.name}» اطمینان دارید؟`)) {
-                                onDeleteProduct(p.id);
-                              }
+                              setConfirmModal({
+                                title: 'حذف محصول',
+                                message: `آیا از حذف محصول «${p.name}» از فروشگاه اطمینان دارید؟`,
+                                confirmLabel: 'بله، حذف کن',
+                                isDanger: true,
+                                onConfirm: () => onDeleteProduct(p.id),
+                              });
                             }}
-                            className="p-1.5 rounded-lg bg-red-50 hover:bg-red-100 text-red-600"
+                            className="p-1.5 rounded-lg bg-red-50 hover:bg-red-100 text-red-600 cursor-pointer"
                             title="حذف"
                           >
                             <Trash2 className="w-3.5 h-3.5" />
@@ -1357,6 +1473,84 @@ export const AdminModal: React.FC<AdminModalProps> = ({
               <div className="pt-2 border-t flex justify-between text-sm font-black text-[#231709]">
                 <span>مبلغ کل فاکتور:</span>
                 <span>{invoiceOrder.totalAmount.toLocaleString('fa-IR')} تومان</span>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* RECEIPT IMAGE LIGHTBOX VIEWER */}
+        {receiptLightboxUrl && (
+          <div className="fixed inset-0 z-50 overflow-y-auto bg-black/85 backdrop-blur-sm flex items-center justify-center p-3 sm:p-6 animate-in fade-in duration-150">
+            <div className="relative max-w-3xl w-full bg-[#181818] rounded-3xl overflow-hidden border border-white/20 shadow-2xl flex flex-col items-center">
+              <div className="w-full flex items-center justify-between p-4 bg-black/50 text-white">
+                <span className="text-xs sm:text-sm font-bold">تصویر فیش واریزی خریدار (اندازه کامل)</span>
+                <button
+                  type="button"
+                  onClick={() => setReceiptLightboxUrl(null)}
+                  className="p-1.5 rounded-full bg-white/20 hover:bg-white/30 text-white transition-all cursor-pointer"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+              <div className="p-4 max-h-[75vh] overflow-auto flex items-center justify-center w-full">
+                <img
+                  src={receiptLightboxUrl}
+                  alt="تصویر فیش واریز"
+                  className="max-h-[70vh] w-auto max-w-full object-contain rounded-xl shadow-lg"
+                />
+              </div>
+              <div className="p-3 bg-black/40 w-full text-center">
+                <button
+                  type="button"
+                  onClick={() => setReceiptLightboxUrl(null)}
+                  className="px-5 py-2 bg-white/20 hover:bg-white/30 text-white rounded-xl text-xs font-bold transition-all"
+                >
+                  بستن پیش‌نمایش
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* IN-APP CONFIRMATION MODAL (Replaces window.confirm) */}
+        {confirmModal && (
+          <div className="fixed inset-0 z-50 overflow-y-auto bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-150">
+            <div className="bg-white rounded-3xl p-6 max-w-md w-full text-right shadow-2xl border border-[#E4D7C2] space-y-4">
+              <div className="flex items-center gap-2.5">
+                <div className={`w-10 h-10 rounded-2xl flex items-center justify-center ${confirmModal.isDanger ? 'bg-red-100 text-red-600' : 'bg-amber-100 text-amber-700'}`}>
+                  {confirmModal.isDanger ? <Trash2 className="w-5 h-5" /> : <RotateCcw className="w-5 h-5" />}
+                </div>
+                <h4 className="font-black text-[#231709] text-base">{confirmModal.title}</h4>
+              </div>
+
+              <p className="text-xs sm:text-sm text-gray-700 leading-relaxed font-medium">
+                {confirmModal.message}
+              </p>
+
+              <div className="flex items-center gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const fn = confirmModal.onConfirm;
+                    setConfirmModal(null);
+                    fn();
+                  }}
+                  className={`flex-1 py-2.5 px-4 rounded-xl text-white text-xs font-bold transition-all shadow-md cursor-pointer ${
+                    confirmModal.isDanger
+                      ? 'bg-red-600 hover:bg-red-700'
+                      : 'bg-[#163826] hover:bg-[#0E2619]'
+                  }`}
+                >
+                  {confirmModal.confirmLabel || 'تایید'}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setConfirmModal(null)}
+                  className="py-2.5 px-4 rounded-xl bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-bold transition-all cursor-pointer"
+                >
+                  انصراف
+                </button>
               </div>
             </div>
           </div>
