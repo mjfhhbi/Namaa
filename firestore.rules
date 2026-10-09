@@ -1,0 +1,39 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper functions
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 128;
+    }
+
+    // Products collection: public read, allow writes for catalog management
+    match /products/{productId} {
+      allow read: if isValidId(productId);
+      allow create, update, delete: if isValidId(productId);
+    }
+
+    // Orders collection: customers create orders, can read by ID, admin updates status
+    match /orders/{orderId} {
+      allow read: if isValidId(orderId);
+      allow create: if isValidId(orderId) &&
+        request.resource.data.id is string &&
+        request.resource.data.customerName is string &&
+        request.resource.data.customerPhone is string &&
+        request.resource.data.totalAmount is number;
+      allow update: if isValidId(orderId);
+      allow delete: if isValidId(orderId);
+    }
+
+    // Store settings: public read for bank details and shipping, allow write for configuration
+    match /settings/{settingId} {
+      allow read: if isValidId(settingId);
+      allow write: if isValidId(settingId);
+    }
+
+    // Default deny for all other paths
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

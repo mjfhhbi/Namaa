@@ -1,0 +1,6 @@
+{
+  "name": "فروشگاه مواد غذایی ناما | NAMA Food Products",
+  "description": "فروشگاه تخصصی مواد غذایی طبیعی و سنتی ناما - از نام و جان برای طعمی ماندگار (عسل طبیعی، خرما، شیره و محصولات ارگانیک)",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

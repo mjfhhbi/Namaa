@@ -1,0 +1,211 @@
+{
+  "entities": {
+    "Product": {
+      "title": "Product",
+      "description": "Natural food product available for purchase in Nama store",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier for the product"
+        },
+        "name": {
+          "type": "string",
+          "description": "Name of the product in Persian"
+        },
+        "category": {
+          "type": "string",
+          "description": "Product category: honey, dates, syrup, saffron_tea, extracts_oils"
+        },
+        "price": {
+          "type": "number",
+          "description": "Price in Tomans"
+        },
+        "originalPrice": {
+          "type": "number",
+          "description": "Original non-discounted price in Tomans"
+        },
+        "weight": {
+          "type": "string",
+          "description": "Weight or volume specification"
+        },
+        "description": {
+          "type": "string",
+          "description": "Full product description and properties"
+        },
+        "origin": {
+          "type": "string",
+          "description": "Geographical origin of production"
+        },
+        "stock": {
+          "type": "number",
+          "description": "Available stock quantity"
+        },
+        "image": {
+          "type": "string",
+          "description": "Product image URL or data URI"
+        },
+        "isPopular": {
+          "type": "boolean",
+          "description": "Whether to highlight as featured/bestseller"
+        },
+        "isOrganic": {
+          "type": "boolean",
+          "description": "Organic certification badge"
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "Creation timestamp"
+        }
+      },
+      "required": ["id", "name", "category", "price", "stock", "image"]
+    },
+    "Order": {
+      "title": "Order",
+      "description": "Customer purchase order with card-to-card verification details",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Order tracking identifier"
+        },
+        "customerName": {
+          "type": "string",
+          "description": "Full name of the recipient"
+        },
+        "customerPhone": {
+          "type": "string",
+          "description": "Iranian mobile number for SMS/delivery"
+        },
+        "address": {
+          "type": "string",
+          "description": "Detailed delivery postal address"
+        },
+        "postalCode": {
+          "type": "string",
+          "description": "10-digit postal code"
+        },
+        "subtotal": {
+          "type": "number",
+          "description": "Products subtotal in Tomans"
+        },
+        "shippingCost": {
+          "type": "number",
+          "description": "Postage shipping fee in Tomans"
+        },
+        "totalAmount": {
+          "type": "number",
+          "description": "Final payable amount in Tomans"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["pending_receipt", "paid_pending_approval", "approved", "packaging", "shipped", "cancelled"],
+          "description": "Current order lifecycle status"
+        },
+        "paymentMethod": {
+          "type": "string",
+          "description": "Payment method: card_to_card"
+        },
+        "cardLast4": {
+          "type": "string",
+          "description": "Last 4 digits of customer paying card"
+        },
+        "paymentReference": {
+          "type": "string",
+          "description": "Bank transfer tracking/reference number"
+        },
+        "receiptImage": {
+          "type": "string",
+          "description": "Bank receipt image URI"
+        },
+        "trackingCode": {
+          "type": "string",
+          "description": "Iran Post postal tracking parcel code"
+        },
+        "notes": {
+          "type": "string",
+          "description": "Customer notes or admin internal remarks"
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "Order creation ISO timestamp"
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "Order last status update timestamp"
+        }
+      },
+      "required": ["id", "customerName", "customerPhone", "address", "totalAmount", "status", "createdAt"]
+    },
+    "StoreSettings": {
+      "title": "StoreSettings",
+      "description": "Store configuration, bank card details, admin password and ntfy settings",
+      "type": "object",
+      "properties": {
+        "storeName": {
+          "type": "string",
+          "description": "Store display title"
+        },
+        "slogan": {
+          "type": "string",
+          "description": "Brand slogan"
+        },
+        "adminPassword": {
+          "type": "string",
+          "description": "Admin access passcode (default 1383)"
+        },
+        "cardNumber": {
+          "type": "string",
+          "description": "16-digit bank card number for payments"
+        },
+        "shabaNumber": {
+          "type": "string",
+          "description": "IBAN / Sheba number"
+        },
+        "cardHolder": {
+          "type": "string",
+          "description": "Account holder official full name"
+        },
+        "bankName": {
+          "type": "string",
+          "description": "Issuing bank name (e.g. ملی، ملت، سامان)"
+        },
+        "shippingCost": {
+          "type": "number",
+          "description": "Default shipping cost in Tomans"
+        },
+        "freeShippingThreshold": {
+          "type": "number",
+          "description": "Order minimum for free express shipping"
+        },
+        "supportPhone": {
+          "type": "string",
+          "description": "Customer care direct phone number"
+        },
+        "ntfyTopic": {
+          "type": "string",
+          "description": "Topic name for instant ntfy push alerts"
+        },
+        "announcement": {
+          "type": "string",
+          "description": "Top promotional banner text"
+        }
+      },
+      "required": ["storeName", "cardNumber", "cardHolder", "adminPassword"]
+    }
+  },
+  "firestore": {
+    "/products/{productId}": {
+      "schema": "Product",
+      "description": "Collection of food catalog products"
+    },
+    "/orders/{orderId}": {
+      "schema": "Order",
+      "description": "Collection of customer orders with verification and shipment records"
+    },
+    "/settings/{settingId}": {
+      "schema": "StoreSettings",
+      "description": "Global store settings and administrative configuration"
+    }
+  }
+}
