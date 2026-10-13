@@ -34,13 +34,13 @@ export const Footer: React.FC<FooterProps> = ({
             </div>
 
             <p className="text-xs sm:text-sm text-[#DFD3C3] leading-relaxed max-w-sm">
-              {settings.aboutText || "فروشگاه تخصصی مواد غذایی ارگانیک و سنتی ناما با پایبندی به شعار «از نام و جان برای طعمی ماندگار»، برترین محصولات سالم مزارع، کوهپایه‌ها و نخلستان‌های ایران را مستقیماً به سفره‌های گرم خانواده‌ها می‌رساند."}
+              {settings.aboutText || "فروشگاه تخصصی محصولات طبیعی و سالم ناما با پایبندی به شعار «از نام و جان برای طعمی ماندگار»، باکیفیت‌ترین خوراکی‌های اصیل و سنتی ایران را مستقیماً به سفره‌های پربرکت خانواده‌ها می‌رساند."}
             </p>
 
             <div className="flex items-center gap-3 pt-2">
               <div className="flex items-center gap-1.5 text-xs text-[#E8C574] font-bold bg-white/5 border border-white/10 px-3 py-1.5 rounded-xl">
                 <Award className="w-4 h-4 text-[#D4A340]" />
-                <span>برگه آزمایش تایید خلوص عسل</span>
+                <span>ضمانت کیفیت و سلامت کالا</span>
               </div>
               <div className="flex items-center gap-1.5 text-xs text-emerald-300 font-bold bg-white/5 border border-white/10 px-3 py-1.5 rounded-xl">
                 <ShieldCheck className="w-4 h-4 text-emerald-400" />
@@ -64,21 +64,6 @@ export const Footer: React.FC<FooterProps> = ({
                   <span>پیگیری مرسوله پستی با کد رهگیری</span>
                 </button>
               </li>
-              <li>
-                <button
-                  onClick={onOpenAdmin}
-                  className="hover:text-amber-300 transition-colors flex items-center gap-1.5"
-                >
-                  <KeyRound className="w-3.5 h-3.5 text-amber-400" />
-                  <span>ورود به پنل مدیریت فروشگاه (رمز: 1383)</span>
-                </button>
-              </li>
-              <li className="pt-1 text-[11px] text-gray-400">
-                تسویه حساب کارت به کارت امن با بانک {settings.bankName}
-              </li>
-              <li className="text-[11px] text-gray-400">
-                ارسال سریع به سراسر ایران با پست پیشتاز
-              </li>
             </ul>
           </div>
 
@@ -91,28 +76,34 @@ export const Footer: React.FC<FooterProps> = ({
               هرگونه سوال در رابطه با سفارشات، ارسال و خواص محصولات دارید با ما در ارتباط باشید:
             </p>
 
-            <div className="space-y-2 text-xs">
+            <div className="space-y-2.5 text-xs">
               <a 
-                href={`tel:${settings.supportPhone}`} 
+                href={`tel:${settings.supportPhone || '+989166449409'}`} 
                 className="flex items-center gap-2 text-white hover:text-amber-300 transition-colors"
               >
                 <PhoneCall className="w-4 h-4 text-emerald-400" />
-                <span>تلفن تماس مستقیم: <strong dir="ltr" className="font-mono">{settings.supportPhone}</strong></span>
+                <span>تلفن تماس: <strong dir="ltr" className="font-mono text-emerald-300">{settings.supportPhone || '+98 916 644 9409'}</strong></span>
               </a>
 
-              {settings.supportInstagram && (
-                <div className="flex items-center gap-2 text-gray-300">
-                  <Instagram className="w-4 h-4 text-pink-400" />
-                  <span>اینستاگرام: <span dir="ltr" className="font-mono text-white">@{settings.supportInstagram}</span></span>
-                </div>
-              )}
+              <a 
+                href="https://wa.me/989166449409" 
+                target="_blank" 
+                rel="noopener noreferrer"
+                className="flex items-center gap-2 text-emerald-300 hover:text-emerald-200 transition-colors bg-emerald-950/40 px-3 py-1.5 rounded-xl border border-emerald-500/30 w-fit"
+              >
+                <span className="w-4 h-4 flex items-center justify-center font-bold text-sm">💬</span>
+                <span>واتساپ پشتیبانی: <strong dir="ltr" className="font-mono">+98 916 644 9409</strong></span>
+              </a>
 
-              {settings.supportTelegram && (
-                <div className="flex items-center gap-2 text-gray-300">
-                  <Send className="w-4 h-4 text-sky-400" />
-                  <span>تلگرام پشتیبانی: <span dir="ltr" className="font-mono text-white">@{settings.supportTelegram}</span></span>
-                </div>
-              )}
+              <a 
+                href="https://instagram.com/namafoods_" 
+                target="_blank" 
+                rel="noopener noreferrer"
+                className="flex items-center gap-2 text-gray-300 hover:text-pink-300 transition-colors"
+              >
+                <Instagram className="w-4 h-4 text-pink-400" />
+                <span>اینستاگرام: <span dir="ltr" className="font-mono text-white font-bold">@namafoods_</span></span>
+              </a>
             </div>
           </div>
         </div>

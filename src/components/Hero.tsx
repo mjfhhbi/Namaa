@@ -16,24 +16,27 @@ interface HeroProps {
   onScrollToCatalog: () => void;
 }
 
-const CATEGORIES: { id: ProductCategory; label: string; icon: string }[] = [
-  { id: 'all', label: 'همه محصولات', icon: '🌿' },
-  { id: 'honey_medicinal', label: 'عسل‌های درمانی و خاص', icon: '🍯' },
-  { id: 'dates_export', label: 'خرماهای صادراتی و لوکس', icon: '🌴' },
-  { id: 'syrups_traditional', label: 'شیره‌ها و معجون‌های سنتی', icon: '🥣' },
-  { id: 'saffron_gold', label: 'زعفران و طلای سرخ', icon: '✨' },
-  { id: 'oils_herbal', label: 'روغن‌های فرابکر و دمنوش', icon: '🫒' },
-];
-
 export const Hero: React.FC<HeroProps> = ({
   settings,
   activeCategory,
   onSelectCategory,
   onScrollToCatalog,
 }) => {
+  const categoriesList = [
+    { id: 'all', label: 'همه محصولات', icon: '🌿' },
+    ...(settings.customCategories && settings.customCategories.length > 0
+      ? settings.customCategories.map(c => ({
+          id: c.id,
+          label: c.name,
+          icon: c.icon || '🍵'
+        }))
+      : []
+    )
+  ];
+
   const badgeText = settings.heroBadge || "محصولات غذایی ۱۰۰٪ طبیعی، سالم و دستچین ایرانی";
   const titleText = settings.heroTitle || "از نام و جان، برای طعمی ماندگار";
-  const subtitleText = settings.heroSubtitle || "سفره‌ای پربرکت با اصیل‌ترین طعم‌های دیار ایران؛ از عسل‌های بکر سبلان و خرمای شکلاتی پیارم تا دوشاب ناب ملایر و زعفران نگین قائنات، بدون مواد افزودنی و با تضمین بازگشت وجه.";
+  const subtitleText = settings.heroSubtitle || "سفره‌ای پربرکت با اصیل‌ترین خوراکی‌های سنتی، سالم و سلامت‌محور ایران؛ دستچین‌شده با تعهد به خلوص، کیفیت ممتاز و طعمی ماندگار.";
   const buttonText = settings.heroButtonText || "مشاهده و خرید محصولات";
 
   return (
@@ -109,20 +112,20 @@ export const Hero: React.FC<HeroProps> = ({
             <div className="relative mx-auto max-w-md rounded-3xl overflow-hidden border-4 border-white shadow-2xl bg-white p-2">
               <div className="relative h-72 sm:h-80 rounded-2xl overflow-hidden">
                 <img
-                  src={PRODUCT_IMAGES.pureMountainHoney}
-                  alt="عسل طبیعی و محصولات ارگانیک ناما"
+                  src={PRODUCT_IMAGES.fruitTeaNama}
+                  alt="محصولات طبیعی و اصیل ناما"
                   className="w-full h-full object-cover transform hover:scale-105 transition-transform duration-700"
                 />
                 <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/30 to-transparent flex flex-col justify-end p-5 text-white text-right">
                   <div className="flex items-center gap-2 mb-1.5">
                     <span className="px-2.5 py-0.5 rounded-full bg-[#D4A340] text-[#231709] text-xs font-black">
-                      پیشنهاد ویژه ناما
+                      محصولات دستچین
                     </span>
-                    <span className="text-xs text-amber-200">برداشت امسال</span>
+                    <span className="text-xs text-amber-200">۱۰۰٪ طبیعی و سالم</span>
                   </div>
-                  <h3 className="text-lg font-bold">عسل درمانی سبلان با موم خودبافت</h3>
+                  <h3 className="text-lg font-bold">محصولات اصیل و باکیفیت ناما</h3>
                   <p className="text-xs text-gray-200 mt-1 line-clamp-1">
-                    ساکاروز زیر ۲ درصد با عطر گیاهان دارویی خودرو دامنه‌های کوهستان
+                    تهیه‌شده از تازه‌ترین مواد اولیه درجه یک با تضمین اصالت و مرغوبیت
                   </p>
                 </div>
               </div>
@@ -133,8 +136,8 @@ export const Hero: React.FC<HeroProps> = ({
                   ۱۰۰٪
                 </div>
                 <div className="text-right">
-                  <div className="text-xs font-bold text-[#231709]">خالص و آزمایش شده</div>
-                  <div className="text-[11px] text-[#695745]">بدون شکر و حرارت</div>
+                  <div className="text-xs font-bold text-[#231709]">اصالت و کیفیت تضمینی</div>
+                  <div className="text-[11px] text-[#695745]">سالم و سنتی</div>
                 </div>
               </div>
             </div>
@@ -142,36 +145,38 @@ export const Hero: React.FC<HeroProps> = ({
 
         </div>
 
-        {/* Categories Navigation Bar */}
-        <div id="catalog-section" className="mt-10 pt-6 border-t border-[#E5DAC4]">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg sm:text-xl font-bold text-[#231709] flex items-center gap-2">
-              <span>دسته‌بندی‌های محصولات ناما</span>
-              <span className="w-2.5 h-2.5 rounded-full bg-[#D4A340]" />
-            </h2>
-            <span className="text-xs text-[#6B5A4B]">کلیک برای فیلتر سریع فهرست</span>
-          </div>
+        {/* Categories Navigation Bar (Shown when categories exist) */}
+        {categoriesList.length > 1 && (
+          <div id="catalog-section" className="mt-10 pt-6 border-t border-[#E5DAC4]">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg sm:text-xl font-bold text-[#231709] flex items-center gap-2">
+                <span>دسته‌بندی‌های محصولات ناما</span>
+                <span className="w-2.5 h-2.5 rounded-full bg-[#D4A340]" />
+              </h2>
+              <span className="text-xs text-[#6B5A4B]">کلیک برای فیلتر سریع فهرست</span>
+            </div>
 
-          <div className="flex items-center gap-2.5 overflow-x-auto pb-2 scrollbar-none">
-            {CATEGORIES.map((cat) => {
-              const isActive = activeCategory === cat.id;
-              return (
-                <button
-                  key={cat.id}
-                  onClick={() => onSelectCategory(cat.id)}
-                  className={`flex-shrink-0 inline-flex items-center gap-2 px-4 py-2.5 rounded-full text-xs sm:text-sm font-bold transition-all border ${
-                    isActive
-                      ? 'bg-[#231709] text-[#FAF7F0] border-[#231709] shadow-md shadow-[#231709]/20'
-                      : 'bg-white hover:bg-[#F5EFE3] text-[#3E2D1D] border-[#DFD3BE]'
-                  }`}
-                >
-                  <span className="text-base">{cat.icon}</span>
-                  <span>{cat.label}</span>
-                </button>
-              );
-            })}
+            <div className="flex items-center gap-2.5 overflow-x-auto pb-2 scrollbar-none">
+              {categoriesList.map((cat) => {
+                const isActive = activeCategory === cat.id;
+                return (
+                  <button
+                    key={cat.id}
+                    onClick={() => onSelectCategory(cat.id)}
+                    className={`flex-shrink-0 inline-flex items-center gap-2 px-4 py-2.5 rounded-full text-xs sm:text-sm font-bold transition-all border ${
+                      isActive
+                        ? 'bg-[#231709] text-[#FAF7F0] border-[#231709] shadow-md shadow-[#231709]/20'
+                        : 'bg-white hover:bg-[#F5EFE3] text-[#3E2D1D] border-[#DFD3BE]'
+                    }`}
+                  >
+                    <span className="text-base">{cat.icon}</span>
+                    <span>{cat.label}</span>
+                  </button>
+                );
+              })}
+            </div>
           </div>
-        </div>
+        )}
 
       </div>
     </section>

@@ -35,7 +35,7 @@ export const FeaturedCollections: React.FC<FeaturedCollectionsProps> = ({
             <span className="text-xs font-bold text-[#A47922]">دستچین ممتاز کارشناسان ناما</span>
           </div>
           <h2 className="text-xl sm:text-2xl font-black text-[#231709]">
-            {collectionTab === 'featured' ? 'محصولات منتخب، عسل‌های خاص و خرماهای لوکس' : 'آخرین محصولات اضافه شده به انبار ناما'}
+            {collectionTab === 'featured' ? 'محصولات منتخب و ویژه ناما' : 'آخرین محصولات اضافه شده به انبار ناما'}
           </h2>
         </div>
 

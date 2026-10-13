@@ -7,37 +7,27 @@ service cloud.firestore {
       return id is string && id.size() > 0 && id.size() <= 128;
     }
 
-    // Products collection: public read, allow writes with valid fields
+    // Products collection: public read for all devices/phones, allow create/update/delete
     match /products/{productId} {
-      allow read: if isValidId(productId);
-      allow create, update: if isValidId(productId) &&
-        request.resource.data.name is string &&
-        request.resource.data.name.size() > 0 &&
-        request.resource.data.price is number &&
-        request.resource.data.price >= 0;
-      allow delete: if isValidId(productId);
+      allow read: if true;
+      allow write: if true;
     }
 
-    // Orders collection: customers create orders, can read by ID, admin updates status
+    // Orders collection: public create for checkout, read for tracking and admin dashboard
     match /orders/{orderId} {
-      allow read: if isValidId(orderId);
-      allow create: if isValidId(orderId) &&
-        request.resource.data.id is string &&
-        request.resource.data.customerName is string &&
-        request.resource.data.customerName.size() > 0 &&
-        request.resource.data.customerPhone is string &&
-        request.resource.data.totalAmount is number &&
-        request.resource.data.totalAmount >= 0;
-      allow update: if isValidId(orderId);
-      allow delete: if isValidId(orderId);
+      allow read: if true;
+      allow write: if true;
     }
 
-    // Store settings: public read for bank details and shipping, allow write for configuration
+    // Store settings: public read for bank details, WhatsApp, and CMS text; allow update
     match /settings/{settingId} {
-      allow read: if isValidId(settingId);
-      allow write: if isValidId(settingId) &&
-        request.resource.data.storeName is string &&
-        request.resource.data.adminPassword is string;
+      allow read: if true;
+      allow write: if true;
+    }
+
+    // Connection testing
+    match /test/{testId} {
+      allow read, write: if true;
     }
 
     // Default deny for all other paths

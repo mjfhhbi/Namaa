@@ -34,11 +34,8 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
   if (!isOpen) return null;
 
   const subtotal = items.reduce((sum, item) => sum + item.product.price * item.quantity, 0);
-  const isFreeShipping = subtotal >= settings.freeShippingThreshold;
-  const shippingCost = items.length === 0 ? 0 : (isFreeShipping ? 0 : settings.shippingCost);
+  const shippingCost = items.length === 0 ? 0 : settings.shippingCost;
   const total = subtotal + shippingCost;
-  const amountNeededForFreeShipping = Math.max(0, settings.freeShippingThreshold - subtotal);
-  const freeShippingProgress = Math.min(100, Math.round((subtotal / settings.freeShippingThreshold) * 100));
 
   return (
     <div className="fixed inset-0 z-50 overflow-hidden bg-black/60 backdrop-blur-xs flex justify-end">
@@ -68,31 +65,6 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
           </button>
         </div>
 
-        {/* Free Shipping Progress bar */}
-        {items.length > 0 && (
-          <div className="bg-[#F0E8DC] px-4 py-3 border-b border-[#E3D6C1]">
-            <div className="flex items-center justify-between text-xs font-semibold mb-1.5 text-[#2C4032]">
-              <span className="flex items-center gap-1">
-                <Truck className="w-3.5 h-3.5 text-[#163826]" />
-                {isFreeShipping ? (
-                  <span className="text-[#1A5333] font-bold">تبریک! سفارش شما شامل ارسال رایگان شد 🎉</span>
-                ) : (
-                  <span>
-                    فقط <strong className="text-[#163826]">{amountNeededForFreeShipping.toLocaleString('fa-IR')}</strong> تومان تا ارسال رایگان
-                  </span>
-                )}
-              </span>
-              <span>{freeShippingProgress}٪</span>
-            </div>
-            <div className="w-full bg-[#DFD2BC] h-2 rounded-full overflow-hidden">
-              <div 
-                className="bg-gradient-to-r from-[#D4A340] to-[#163826] h-full rounded-full transition-all duration-500"
-                style={{ width: `${freeShippingProgress}%` }}
-              />
-            </div>
-          </div>
-        )}
-
         {/* Items List */}
         <div className="flex-1 overflow-y-auto p-4 sm:p-5 space-y-3">
           {items.length === 0 ? (
@@ -102,7 +74,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
               </div>
               <p className="text-base font-bold text-[#2A3E30] mb-1">سبد خرید شما در حال حاضر خالی است</p>
               <p className="text-xs text-[#6F7F72] max-w-xs mb-6">
-                از بخش کاتالوگ فروشگاه ناما، عسل‌های طبیعی و خوراکی‌های سالم را به سبد خود بیفزایید.
+                از بخش کاتالوگ فروشگاه ناما، محصولات اصیل و سالم را به سبد خرید خود بیفزایید.
               </p>
               <button
                 onClick={onClose}
@@ -179,11 +151,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
               <div className="flex justify-between">
                 <span>هزینه بسته‌بندی و ارسال:</span>
                 <span className="font-bold">
-                  {shippingCost === 0 ? (
-                    <span className="text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded">رایگان</span>
-                  ) : (
-                    `${shippingCost.toLocaleString('fa-IR')} تومان`
-                  )}
+                  {shippingCost > 0 ? `${shippingCost.toLocaleString('fa-IR')} تومان` : 'طبق تعرفه پستی'}
                 </span>
               </div>
               <div className="flex justify-between pt-2 border-t border-[#EAE0D0] text-sm sm:text-base font-black text-[#163826]">

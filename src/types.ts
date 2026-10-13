@@ -1,10 +1,12 @@
-export type ProductCategory = 
-  | 'all'
-  | 'honey_medicinal'     // عسل‌های درمانی و خاص
-  | 'dates_export'        // خرماهای صادراتی و لوکس
-  | 'syrups_traditional'  // شیره‌ها و معجون‌های سنتی
-  | 'saffron_gold'        // زعفران و طلای سرخ
-  | 'oils_herbal';        // روغن‌های فرابکر و گیاهان دارویی
+export type ProductCategory = 'all' | string;
+
+export interface ProductCategoryItem {
+  id: string; // identifier or slug
+  name: string; // Persian display label, e.g. "چای", "دمنوش"
+  icon?: string; // emoji or icon
+  description?: string;
+  image?: string;
+}
 
 export interface Product {
   id: string;
@@ -44,6 +46,7 @@ export interface CartItem {
 export type OrderStatus = 
   | 'pending_receipt'        // در انتظار ثبت فیش واریز
   | 'paid_pending_approval'  // فیش ثبت شده، در انتظار تایید ادمین
+  | 'processing'             // پرداخت آنلاین موفق زرین‌پال، در انتظار پردازش
   | 'approved'               // واریز تایید شد
   | 'packaging'              // در حال بسته‌بندی بهداشتی
   | 'shipped'                // تحویل پست و ارسال شد
@@ -71,14 +74,29 @@ export interface Order {
   shippingCost: number;
   totalAmount: number;
   status: OrderStatus;
-  paymentMethod: 'card_to_card';
+  paymentMethod: 'card_to_card' | 'zarinpal';
   cardLast4?: string;
   paymentReference?: string;
+  zarinpalAuthority?: string;
   receiptImage?: string; // base64 or URL
   trackingCode?: string; // Postal tracking code
   notes?: string;
+  discountCode?: string;
+  discountAmount?: number;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface DiscountCode {
+  id: string;
+  code: string;
+  type: 'percent' | 'fixed';
+  amount: number; // e.g. 10 for 10% or 50000 for 50,000 Tomans
+  minPurchase?: number; // Minimum cart value
+  maxDiscount?: number; // Max discount in Tomans for percentage discounts
+  isActive: boolean;
+  expiresAt?: string;
+  usageCount: number;
 }
 
 export interface StoreSettings {
@@ -92,16 +110,19 @@ export interface StoreSettings {
   shabaNumber: string;
   // هزینه‌ها
   shippingCost: number;
-  freeShippingThreshold: number;
+  freeShippingThreshold?: number;
   // پشتیبانی
   supportPhone: string;
+  supportWhatsApp: string;
   supportInstagram: string;
-  supportTelegram: string;
+  supportTelegram?: string;
   supportAddress?: string;
   // اعلان‌ها
   ntfyTopic: string;
   announcement: string;
   isStoreOpen: boolean;
+  storeClosedMessage?: string;
+  shippingNote?: string;
   // متون کامل سایت (CMS قابل ویرایش کامل از پنل مدیریت)
   heroBadge?: string;
   heroTitle?: string;
@@ -115,4 +136,10 @@ export interface StoreSettings {
   qualityBadge2?: string;
   qualityBadge3?: string;
   qualityBadge4?: string;
+  customCategories?: ProductCategoryItem[];
+  discountCodes?: DiscountCode[];
+  // درگاه پرداخت آنلاین زرین‌پال
+  zarinpalEnabled?: boolean;
+  zarinpalMerchantId?: string; // کد ۳۶ کاراکتری مرچنت زرین‌پال
+  zarinpalSandbox?: boolean; // حالت تستی
 }

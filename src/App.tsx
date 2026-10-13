@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   Product, 
   Order, 
@@ -19,9 +19,13 @@ import {
   deleteProduct, 
   clearAllProducts, 
   resetSampleProducts, 
-  updateStoreSettings 
+  updateStoreSettings,
+  subscribeToProducts,
+  subscribeToOrders,
+  subscribeToSettings
 } from './services/storeService';
 import { testFirestoreConnection } from './firebase';
+import { playNewOrderChime } from './utils/audioAlert';
 import { Header } from './components/Header';
 import { Hero } from './components/Hero';
 import { CategoryShowcase } from './components/CategoryShowcase';
@@ -34,7 +38,8 @@ import { CheckoutModal } from './components/CheckoutModal';
 import { OrderTrackingModal } from './components/OrderTrackingModal';
 import { AdminModal } from './components/AdminModal';
 import { Footer } from './components/Footer';
-import { DEFAULT_SETTINGS, DEFAULT_PRODUCTS } from './data/defaultProducts';
+import { WhatsAppButton } from './components/WhatsAppButton';
+import { DEFAULT_SETTINGS } from './data/defaultProducts';
 import { 
   SlidersHorizontal, 
   Sparkles, 
@@ -44,7 +49,7 @@ import {
 } from 'lucide-react';
 
 export default function App() {
-  const [products, setProducts] = useState<Product[]>(DEFAULT_PRODUCTS);
+  const [products, setProducts] = useState<Product[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
   const [settings, setSettings] = useState<StoreSettings>(DEFAULT_SETTINGS);
   const [cart, setCart] = useState<CartItem[]>(() => {
@@ -63,6 +68,7 @@ export default function App() {
 
   // Modals
   const [isCartOpen, setIsCartOpen] = useState(false);
+  const [isCartBumping, setIsCartBumping] = useState(false);
   const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
   const [isTrackingOpen, setIsTrackingOpen] = useState(false);
   const [isAdminOpen, setIsAdminOpen] = useState(false);
@@ -80,8 +86,15 @@ export default function App() {
     }
   }, [cart]);
 
-  // Initial load from Firestore and test connection
+  const knownOrderIdsRef = useRef<Set<string>>(new Set());
+  const isInitialOrdersLoadedRef = useRef(false);
+
+  // Initial load and live real-time sync across all devices & phones
   useEffect(() => {
+    let unsubProducts: (() => void) | undefined;
+    let unsubOrders: (() => void) | undefined;
+    let unsubSettings: (() => void) | undefined;
+
     async function loadData() {
       await testFirestoreConnection();
       const [fetchedSettings, fetchedProducts, fetchedOrders] = await Promise.all([
@@ -92,8 +105,40 @@ export default function App() {
       setSettings(fetchedSettings);
       setProducts(fetchedProducts);
       setOrders(fetchedOrders);
+
+      fetchedOrders.forEach(o => knownOrderIdsRef.current.add(o.id));
+      isInitialOrdersLoadedRef.current = true;
+
+      // Start live real-time listeners for instant synchronization across all phones
+      unsubProducts = subscribeToProducts((liveProducts) => {
+        setProducts(liveProducts);
+      });
+      unsubOrders = subscribeToOrders((liveOrders) => {
+        if (isInitialOrdersLoadedRef.current) {
+          const incomingNew = liveOrders.filter(o => !knownOrderIdsRef.current.has(o.id));
+          if (incomingNew.length > 0) {
+            playNewOrderChime();
+            const latest = incomingNew[0];
+            showToast(`🔔 سفارش جدید ثبت شد! (${latest.customerName} - ${latest.totalAmount.toLocaleString('fa-IR')} تومان)`);
+            incomingNew.forEach(o => knownOrderIdsRef.current.add(o.id));
+          }
+        } else {
+          liveOrders.forEach(o => knownOrderIdsRef.current.add(o.id));
+        }
+        setOrders(liveOrders);
+      });
+      unsubSettings = subscribeToSettings((liveSettings) => {
+        setSettings(liveSettings);
+      });
     }
+
     loadData();
+
+    return () => {
+      if (unsubProducts) unsubProducts();
+      if (unsubOrders) unsubOrders();
+      if (unsubSettings) unsubSettings();
+    };
   }, []);
 
   const showToast = (msg: string) => {
@@ -105,6 +150,11 @@ export default function App() {
 
   // Cart operations
   const handleAddToCart = (product: Product, quantity: number = 1) => {
+    setIsCartBumping(true);
+    setTimeout(() => {
+      setIsCartBumping(false);
+    }, 800);
+
     setCart(prev => {
       const index = prev.findIndex(item => item.product.id === product.id);
       if (index >= 0) {
@@ -246,7 +296,7 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen flex flex-col bg-[#FAF7F0] text-[#231709]">
+    <div className="min-h-screen flex flex-col bg-[#FAF7F0] text-[#231709] w-full max-w-full overflow-x-hidden relative">
       {/* Toast Alert */}
       {toastMessage && (
         <div className="fixed bottom-6 right-6 z-50 bg-[#231709] text-[#FAF7F0] px-4 py-3 rounded-2xl shadow-xl border border-[#D4A340]/60 flex items-center gap-2.5 text-xs sm:text-sm font-bold animate-in fade-in slide-in-from-bottom-4 duration-200">
@@ -259,6 +309,7 @@ export default function App() {
       <Header
         settings={settings}
         cartCount={cartTotalItemsCount}
+        isCartBumping={isCartBumping}
         onOpenCart={() => setIsCartOpen(true)}
         onOpenTracking={() => setIsTrackingOpen(true)}
         onOpenAdmin={() => setIsAdminOpen(true)}
@@ -281,13 +332,15 @@ export default function App() {
         onSelectCategory={handleSelectCategory}
       />
 
-      {/* 2. Visual Promo Banners with High-Quality Images & Slogan "از نام و جان برای طعمی ماندگار" */}
-      <PromoBanners
-        settings={settings}
-        onSelectCategory={handleSelectCategory}
-      />
+      {/* 2. Visual Promo Banners (Show only when products are added to store) */}
+      {products.length > 0 && (
+        <PromoBanners
+          settings={settings}
+          onSelectCategory={handleSelectCategory}
+        />
+      )}
 
-      {/* 3. Featured Products & New Arrivals (محصولات منتخب عسل‌های خاص و خرماهای لوکس / آخرین محصولات اضافه شده) */}
+      {/* 3. Featured Products & New Arrivals (محصولات منتخب / آخرین محصولات اضافه شده) */}
       {products.length > 0 && (
         <FeaturedCollections
           products={products}
@@ -303,12 +356,12 @@ export default function App() {
           <div className="flex items-center gap-2">
             <Filter className="w-4 h-4 text-[#A47922]" />
             <span className="text-xs sm:text-sm font-black text-[#231709]">
-              {activeCategory === 'all' && 'تمامی محصولات اصیل ناما'}
-              {activeCategory === 'honey_medicinal' && 'عسل‌های درمانی و خاص'}
-              {activeCategory === 'dates_export' && 'خرماهای صادراتی و لوکس'}
-              {activeCategory === 'syrups_traditional' && 'شیره‌ها و معجون‌های سنتی'}
-              {activeCategory === 'saffron_gold' && 'زعفران و طلای سرخ قائنات'}
-              {activeCategory === 'oils_herbal' && 'روغن‌های فرابکر و دمنوش‌ها'}
+              {activeCategory === 'all' 
+                ? 'تمامی محصولات اصیل ناما' 
+                : (settings.customCategories?.find(c => c.id === activeCategory)?.name || 
+                   products.find(p => p.category === activeCategory)?.categoryLabel || 
+                   activeCategory)
+              }
             </span>
             <span className="text-xs text-[#5C4B3C] bg-[#FAF3E3] px-2.5 py-0.5 rounded-full font-bold border border-[#E8DEC9]">
               {filteredProducts.length} محصول
@@ -347,36 +400,28 @@ export default function App() {
             ))}
           </div>
         ) : (
-          <div className="py-20 text-center bg-white rounded-3xl border border-[#E7DDC9] p-8 shadow-xs">
+          <div className="py-16 text-center bg-white rounded-3xl border border-[#E7DDC9] p-8 shadow-xs">
             <div className="w-16 h-16 rounded-full bg-[#FAF3E3] flex items-center justify-center text-[#A47922] mx-auto mb-3">
               <Leaf className="w-8 h-8 text-[#A47922]" />
             </div>
-            <h3 className="text-base font-bold text-[#231709] mb-1">
+            <h3 className="text-base font-black text-[#231709] mb-1">
               {products.length === 0 ? 'کاتالوگ محصولات در حال حاضر خالی است' : 'محصولی با این فیلتر یافت نشد'}
             </h3>
-            <p className="text-xs text-[#6B5A4B] max-w-sm mx-auto mb-5 leading-relaxed">
+            <p className="text-xs text-[#6B5A4B] max-w-md mx-auto mb-5 leading-relaxed">
               {products.length === 0 
-                ? 'شما محصولات را حذف کرده‌اید. می‌توانید از طریق پنل مدیریت محصولات دلخواه خود را اضافه کنید یا محصولات نمونه را با ۱ کلیک بازگردانید.'
+                ? 'فروشگاه ناما آماده ثبت محصولات اختصاصی شماست. از طریق پنل مدیریت می‌توانید دسته‌بندی جدید (مانند چای، دمنوش یا هر دسته دلخواه) تعریف کنید و محصولات خود را با تعداد و توضیحات ثبت نمایید.'
                 : 'می‌توانید عبارت دیگری را جستجو کرده یا فیلتر دسته‌بندی را به «همه محصولات» تغییر دهید.'
               }
             </p>
             <div className="flex items-center justify-center gap-3">
               {products.length === 0 ? (
-                <>
-                  <button
-                    onClick={handleResetSampleProducts}
-                    className="px-5 py-2.5 rounded-full bg-[#D4A340] hover:bg-[#B8860B] text-[#231709] text-xs font-black shadow-md transition-all"
-                  >
-                    بازگردانی محصولات نمونه با عکس
-                  </button>
-                  <button
-                    onClick={() => setIsAdminOpen(true)}
-                    className="px-5 py-2.5 rounded-full bg-[#231709] hover:bg-[#150D05] text-white text-xs font-bold shadow-md transition-all flex items-center gap-1.5"
-                  >
-                    <Plus className="w-4 h-4 text-amber-300" />
-                    <span>افزودن محصول جدید در پنل</span>
-                  </button>
-                </>
+                <button
+                  onClick={() => setIsAdminOpen(true)}
+                  className="px-6 py-2.5 rounded-full bg-[#231709] hover:bg-[#150D05] text-white text-xs font-bold shadow-md transition-all flex items-center gap-2"
+                >
+                  <Plus className="w-4 h-4 text-amber-300" />
+                  <span>ورود به پنل و افزودن محصول جدید</span>
+                </button>
               ) : (
                 <button
                   onClick={() => {
@@ -391,6 +436,7 @@ export default function App() {
             </div>
           </div>
         )}
+
       </main>
 
       {/* Footer */}
@@ -399,6 +445,9 @@ export default function App() {
         onOpenTracking={() => setIsTrackingOpen(true)}
         onOpenAdmin={() => setIsAdminOpen(true)}
       />
+
+      {/* Floating WhatsApp Quick Support Button */}
+      <WhatsAppButton phone={settings.supportPhone || '+98 916 644 9409'} />
 
       {/* MODALS */}
       <ProductDetailModal
@@ -451,3 +500,4 @@ export default function App() {
     </div>
   );
 }
+

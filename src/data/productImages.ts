@@ -7,6 +7,7 @@ import grapeMolassesSyrup from '../assets/images/grape_molasses_syrup_1791236170
 import superNeginSaffron from '../assets/images/super_negin_saffron_1791236140748.jpg';
 import virginOliveOil from '../assets/images/virgin_olive_oil_1791236187997.jpg';
 import herbalBorageTea from '../assets/images/herbal_borage_tea_1791236204542.jpg';
+import fruitTeaNama from '../assets/images/fruit_tea_nama_1791826556407.jpg';
 import pistachioSesameHalva from '../assets/images/pistachio_sesame_halva_1791236249490.jpg';
 import goldenZahediDates from '../assets/images/golden_zahedi_dates_1791236237442.jpg';
 import pureRoyalJelly from '../assets/images/pure_royal_jelly_1791236217557.jpg';
@@ -21,12 +22,14 @@ export const PRODUCT_IMAGES = {
   superNeginSaffron,
   virginOliveOil,
   herbalBorageTea,
+  fruitTeaNama,
   pistachioSesameHalva,
   goldenZahediDates,
   pureRoyalJelly,
 };
 
 export const PRESET_IMAGE_OPTIONS = [
+  { name: 'چای میوه‌ای و سنتی', url: fruitTeaNama },
   { name: 'عسل کوهستان سبلان', url: pureMountainHoney },
   { name: 'عسل با موم طبیعی', url: naturalRawHoneycomb },
   { name: 'خرمای پیارم شکلاتی', url: luxuryPiaromDates },
@@ -40,3 +43,4 @@ export const PRESET_IMAGE_OPTIONS = [
   { name: 'حلوا ارده با پسته', url: pistachioSesameHalva },
   { name: 'ژل رویال درمانی', url: pureRoyalJelly },
 ];
+

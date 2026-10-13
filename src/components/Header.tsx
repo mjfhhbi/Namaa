@@ -1,6 +1,7 @@
 import React from 'react';
 import { Logo } from './Logo';
 import { StoreSettings } from '../types';
+import { AudioPlayer } from './AudioPlayer';
 import { 
   ShoppingBag, 
   Search, 
@@ -13,6 +14,7 @@ import {
 interface HeaderProps {
   settings: StoreSettings;
   cartCount: number;
+  isCartBumping?: boolean;
   onOpenCart: () => void;
   onOpenTracking: () => void;
   onOpenAdmin: () => void;
@@ -23,6 +25,7 @@ interface HeaderProps {
 export const Header: React.FC<HeaderProps> = ({
   settings,
   cartCount,
+  isCartBumping = false,
   onOpenCart,
   onOpenTracking,
   onOpenAdmin,
@@ -58,7 +61,7 @@ export const Header: React.FC<HeaderProps> = ({
             type="text"
             value={searchQuery}
             onChange={(e) => onSearchChange(e.target.value)}
-            placeholder="جستجوی عسل‌های درمانی، خرماهای لوکس، زعفران، ارده..."
+            placeholder="جستجوی محصولات سالم و اصیل ناما..."
             className="w-full bg-white border border-[#D5C6AC] text-sm text-[#231709] placeholder-[#8C7E70] rounded-full py-2.5 pr-10 pl-4 focus:outline-none focus:ring-2 focus:ring-[#D4A340] focus:border-transparent transition-all shadow-xs"
           />
           <Search className="w-4 h-4 text-[#8C7E70] absolute right-3.5 top-1/2 -translate-y-1/2" />
@@ -73,11 +76,14 @@ export const Header: React.FC<HeaderProps> = ({
         </div>
 
         {/* Action Buttons */}
-        <div className="flex items-center gap-2 sm:gap-3">
+        <div className="flex items-center gap-1.5 sm:gap-2.5">
+          {/* Ambient Music Toggle (At top of page, minimal & out of the way) */}
+          <AudioPlayer />
+
           {/* Order Tracking Button */}
           <button
             onClick={onOpenTracking}
-            className="inline-flex items-center gap-1.5 px-3 sm:px-4 py-2 text-xs sm:text-sm font-bold text-[#231709] bg-[#EDE4D4]/80 hover:bg-[#E2D6C0] rounded-full border border-[#D8CBB2] transition-colors"
+            className="inline-flex items-center gap-1.5 px-2.5 sm:px-3.5 py-1.5 sm:py-2 text-xs sm:text-sm font-bold text-[#231709] bg-[#EDE4D4]/80 hover:bg-[#E2D6C0] rounded-full border border-[#D8CBB2] transition-colors"
             title="پیگیری سفارش با کد رهگیری"
           >
             <Truck className="w-4 h-4 text-[#2F4E34]" />
@@ -88,7 +94,7 @@ export const Header: React.FC<HeaderProps> = ({
           <button
             onClick={onOpenAdmin}
             className="inline-flex items-center gap-1.5 px-2.5 sm:px-3.5 py-2 text-xs sm:text-sm font-bold text-[#4B3B2B] bg-[#F5EFE4] hover:bg-[#EADFCB] rounded-full border border-[#D9CDBF] transition-colors"
-            title="ورود به پنل مدیریت فروشگاه (رمز: 1383)"
+            title="ورود به پنل مدیریت فروشگاه"
           >
             <KeyRound className="w-3.5 h-3.5 text-[#B8860B]" />
             <span className="hidden sm:inline">پنل مدیریت</span>
@@ -97,12 +103,21 @@ export const Header: React.FC<HeaderProps> = ({
           {/* Shopping Cart Button */}
           <button
             onClick={onOpenCart}
-            className="relative inline-flex items-center gap-2 px-3.5 sm:px-4 py-2 text-xs sm:text-sm font-black text-white bg-[#231709] hover:bg-[#150D05] active:scale-95 rounded-full shadow-md shadow-[#231709]/20 transition-all"
+            className={`relative inline-flex items-center gap-2 px-3.5 sm:px-4 py-2 text-xs sm:text-sm font-black text-white bg-[#231709] hover:bg-[#150D05] active:scale-95 rounded-full shadow-md shadow-[#231709]/20 transition-all ${
+              isCartBumping ? 'animate-cart-wiggle ring-4 ring-[#D4A340]/60 bg-[#160E05] shadow-lg shadow-[#D4A340]/30' : ''
+            }`}
           >
-            <ShoppingBag className="w-4 h-4 text-[#D4A340]" />
+            {isCartBumping && (
+              <span className="absolute -top-3 left-1/2 -translate-x-1/2 bg-[#D4A340] text-[#231709] text-[10px] font-black px-2 py-0.5 rounded-full shadow-lg animate-bounce pointer-events-none whitespace-nowrap z-30">
+                +۱ افزوده شد
+              </span>
+            )}
+            <ShoppingBag className={`w-4 h-4 text-[#D4A340] transition-transform ${isCartBumping ? 'scale-125' : ''}`} />
             <span className="hidden sm:inline">سبد خرید</span>
             {cartCount > 0 && (
-              <span className="bg-[#D4A340] text-[#231709] text-[11px] font-black w-5 h-5 rounded-full flex items-center justify-center -mr-1 animate-bounce">
+              <span className={`bg-[#D4A340] text-[#231709] text-[11px] font-black w-5 h-5 rounded-full flex items-center justify-center -mr-1 transition-all ${
+                isCartBumping ? 'scale-130 ring-2 ring-white' : ''
+              }`}>
                 {cartCount}
               </span>
             )}
@@ -117,7 +132,7 @@ export const Header: React.FC<HeaderProps> = ({
             type="text"
             value={searchQuery}
             onChange={(e) => onSearchChange(e.target.value)}
-            placeholder="جستجوی عسل‌های درمانی، خرماهای لوکس ناما..."
+            placeholder="جستجوی محصولات ناما..."
             className="w-full bg-white border border-[#D5C6AC] text-xs text-[#231709] placeholder-[#8C7E70] rounded-full py-2 pr-9 pl-4 focus:outline-none focus:ring-2 focus:ring-[#D4A340]"
           />
           <Search className="w-3.5 h-3.5 text-[#8C7E70] absolute right-3 top-1/2 -translate-y-1/2" />

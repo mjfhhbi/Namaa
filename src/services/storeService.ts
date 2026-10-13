@@ -21,7 +21,44 @@ const LS_CATALOG_INIT_FLAG = 'nama_catalog_initialized_flag_v2';
 export function getLocalSettings(): StoreSettings {
   try {
     const raw = localStorage.getItem(LS_SETTINGS_KEY);
-    if (raw) return JSON.parse(raw);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      // Sanitize legacy defaults
+      if (parsed.supportInstagram === 'nama_naturalfood' || !parsed.supportInstagram) {
+        parsed.supportInstagram = 'namafoods_';
+      }
+      if (parsed.supportPhone === '09120000000' || !parsed.supportPhone) {
+        parsed.supportPhone = '+98 916 644 9409';
+      }
+      if (!parsed.supportWhatsApp) {
+        parsed.supportWhatsApp = '+98 916 644 9409';
+      }
+      parsed.supportTelegram = undefined;
+
+      // If categories still contain old honey/dates mock items
+      if (Array.isArray(parsed.customCategories)) {
+        parsed.customCategories = parsed.customCategories.filter(
+          (c: any) => c.id !== 'honey' && c.id !== 'dates' && !c.name?.includes('عسل') && !c.name?.includes('خرما')
+        );
+      }
+      if (!parsed.customCategories) {
+        parsed.customCategories = [];
+      }
+
+      // Sanitize subtitle texts if they contain legacy honey/dates references
+      if (parsed.heroSubtitle && (parsed.heroSubtitle.includes('عسل') || parsed.heroSubtitle.includes('خرما'))) {
+        parsed.heroSubtitle = DEFAULT_SETTINGS.heroSubtitle;
+      }
+      if (parsed.promoSubtitle && (parsed.promoSubtitle.includes('عسل') || parsed.promoSubtitle.includes('خرما'))) {
+        parsed.promoSubtitle = DEFAULT_SETTINGS.promoSubtitle;
+      }
+      delete parsed.freeShippingThreshold;
+      if (parsed.announcement && parsed.announcement.includes('۶۰۰')) {
+        parsed.announcement = DEFAULT_SETTINGS.announcement;
+      }
+
+      return { ...DEFAULT_SETTINGS, ...parsed };
+    }
   } catch (e) {
     console.error('Failed to read settings from localStorage', e);
   }
@@ -41,12 +78,21 @@ export function getLocalProducts(): Product[] {
     const raw = localStorage.getItem(LS_PRODUCTS_KEY);
     if (raw !== null) {
       const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) return parsed;
+      if (Array.isArray(parsed)) {
+        return parsed.filter(
+          (p: any) =>
+            !p.id?.startsWith('prod-') &&
+            !p.id?.includes('honey') &&
+            !p.id?.includes('date') &&
+            !p.title?.includes('عسل') &&
+            !p.title?.includes('خرما')
+        );
+      }
     }
   } catch (e) {
     console.error('Failed to read products from localStorage', e);
   }
-  return DEFAULT_PRODUCTS;
+  return [];
 }
 
 export function saveLocalProducts(products: Product[]): void {
@@ -116,7 +162,7 @@ export async function updateStoreSettings(newSettings: StoreSettings): Promise<v
   }
 }
 
-// Fetch or seed products
+// Fetch products from Firestore (zero mock products)
 export async function fetchProducts(): Promise<Product[]> {
   const path = 'products';
   try {
@@ -124,31 +170,26 @@ export async function fetchProducts(): Promise<Product[]> {
     if (!querySnapshot.empty) {
       const list: Product[] = [];
       querySnapshot.forEach(docSnap => {
-        list.push(docSnap.data() as Product);
+        const prod = docSnap.data() as Product;
+        // Purge old mock products (prod-1 to prod-12) if they were created earlier
+        if (prod.id && prod.id.startsWith('prod-') && ['prod-1','prod-2','prod-3','prod-4','prod-5','prod-6','prod-7','prod-8','prod-9','prod-10','prod-11','prod-12'].includes(prod.id)) {
+          deleteDoc(doc(db, path, prod.id)).catch(() => {});
+          return;
+        }
+        list.push(prod);
       });
       saveLocalProducts(list);
       return list;
     } else {
-      // If catalog was already initialized and now empty, admin intentionally cleared all products
-      const isAlreadyInit = localStorage.getItem(LS_CATALOG_INIT_FLAG);
-      if (isAlreadyInit === 'true') {
-        saveLocalProducts([]);
-        return [];
-      }
-
-      // Seed initial products to Firestore on very first run
-      const initial = DEFAULT_PRODUCTS;
-      saveLocalProducts(initial);
-      for (const prod of initial) {
-        await setDoc(doc(db, path, prod.id), prod).catch(() => {});
-      }
-      return initial;
+      saveLocalProducts([]);
+      return [];
     }
   } catch (error) {
     console.warn('Firestore products fetch notice, using cached products:', error);
     return getLocalProducts();
   }
 }
+
 
 export async function saveProduct(product: Product): Promise<void> {
   // Update local
@@ -283,7 +324,7 @@ export async function createOrder(order: Order, settings: StoreSettings): Promis
     console.warn('Firestore order write notice:', error);
   }
 
-  // Send ntfy notification to store owner!
+  // Send 100% free ntfy push notification to store owner!
   try {
     await sendNtfyNotification({
       topic: settings.ntfyTopic || 'nama_store_orders_1383',
@@ -405,4 +446,69 @@ export async function sendNtfyNotification(payload: NtfyPayload): Promise<{ succ
       text: err.message || 'خطا در برقراری ارتباط با سرور ntfy'
     };
   }
+}
+
+// -------------------------------------------------------------
+// REAL-TIME LISTENERS (برای همگام‌سازی لحظه‌ای میان تمام گوشی‌ها)
+// -------------------------------------------------------------
+
+export function subscribeToProducts(callback: (products: Product[]) => void): () => void {
+  const path = 'products';
+  return onSnapshot(
+    collection(db, path),
+    (snapshot) => {
+      const list: Product[] = [];
+      snapshot.forEach((docSnap) => {
+        const prod = docSnap.data() as Product;
+        if (!['prod-1','prod-2','prod-3','prod-4','prod-5','prod-6','prod-7','prod-8','prod-9','prod-10','prod-11','prod-12'].includes(prod.id)) {
+          list.push(prod);
+        }
+      });
+      saveLocalProducts(list);
+      callback(list);
+    },
+    (error) => {
+      console.warn('Real-time products sync notice:', error);
+      callback(getLocalProducts());
+    }
+  );
+}
+
+
+export function subscribeToOrders(callback: (orders: Order[]) => void): () => void {
+  const path = 'orders';
+  return onSnapshot(
+    collection(db, path),
+    (snapshot) => {
+      const list: Order[] = [];
+      snapshot.forEach((docSnap) => {
+        list.push(docSnap.data() as Order);
+      });
+      list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      saveLocalOrders(list);
+      callback(list);
+    },
+    (error) => {
+      console.warn('Real-time orders sync notice:', error);
+      callback(getLocalOrders());
+    }
+  );
+}
+
+export function subscribeToSettings(callback: (settings: StoreSettings) => void): () => void {
+  const path = 'settings';
+  return onSnapshot(
+    doc(db, path, 'main'),
+    (docSnap) => {
+      if (docSnap.exists()) {
+        const data = docSnap.data() as StoreSettings;
+        saveLocalSettings(data);
+        callback(data);
+      }
+    },
+    (error) => {
+      console.warn('Real-time settings sync notice:', error);
+      callback(getLocalSettings());
+    }
+  );
 }
