@@ -15,7 +15,7 @@ export const DEFAULT_SETTINGS: StoreSettings = {
   supportTelegram: "",
   supportAddress: "فروشگاه مرکزی محصولات ناما",
   ntfyTopic: "nama_store_orders_1383",
-  announcement: "🌿 از نام و جان برای طعمی ماندگار | محصولات طبیعی و اصیل ایرانی + ارسال فوری سراسری",
+  announcement: "",
   isStoreOpen: true,
   // متون قابل ویرایش هیرو
   heroBadge: "محصولات غذایی ۱۰۰٪ طبیعی، سالم و دستچین ایرانی",

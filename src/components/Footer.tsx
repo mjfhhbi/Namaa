@@ -1,6 +1,7 @@
 import React from 'react';
 import { Logo } from './Logo';
 import { StoreSettings } from '../types';
+import namaLogoImg from '../assets/images/nama_store_logo_1791976961130.jpg';
 import { 
   PhoneCall, 
   Send, 
@@ -29,15 +30,15 @@ export const Footer: React.FC<FooterProps> = ({
           
           {/* Brand & Slogan */}
           <div className="md:col-span-5 space-y-4 text-right">
-            <div className="inline-block bg-[#FAF7F0] p-2.5 rounded-2xl">
-              <Logo size={48} showText={true} />
+            <div className="inline-flex items-center gap-3 bg-[#FAF7F0] p-3 rounded-2xl shadow-md border border-amber-900/20">
+              <Logo size={60} showText={true} />
             </div>
 
             <p className="text-xs sm:text-sm text-[#DFD3C3] leading-relaxed max-w-sm">
               {settings.aboutText || "فروشگاه تخصصی محصولات طبیعی و سالم ناما با پایبندی به شعار «از نام و جان برای طعمی ماندگار»، باکیفیت‌ترین خوراکی‌های اصیل و سنتی ایران را مستقیماً به سفره‌های پربرکت خانواده‌ها می‌رساند."}
             </p>
 
-            <div className="flex items-center gap-3 pt-2">
+            <div className="flex flex-wrap items-center gap-3 pt-2">
               <div className="flex items-center gap-1.5 text-xs text-[#E8C574] font-bold bg-white/5 border border-white/10 px-3 py-1.5 rounded-xl">
                 <Award className="w-4 h-4 text-[#D4A340]" />
                 <span>ضمانت کیفیت و سلامت کالا</span>
@@ -62,6 +63,15 @@ export const Footer: React.FC<FooterProps> = ({
                 >
                   <Truck className="w-3.5 h-3.5 text-emerald-400" />
                   <span>پیگیری مرسوله پستی با کد رهگیری</span>
+                </button>
+              </li>
+              <li>
+                <button
+                  onClick={onOpenAdmin}
+                  className="hover:text-amber-300 transition-colors flex items-center gap-1.5 text-gray-400 hover:text-gray-200"
+                >
+                  <KeyRound className="w-3.5 h-3.5 text-amber-500" />
+                  <span>ورود به پنل مدیریت فروشگاه</span>
                 </button>
               </li>
             </ul>
@@ -110,8 +120,16 @@ export const Footer: React.FC<FooterProps> = ({
 
         {/* Bottom Copyright */}
         <div className="pt-6 flex flex-col sm:flex-row items-center justify-between text-xs text-amber-100/60 gap-3 text-center sm:text-right">
-          <div>
-            © {new Date().getFullYear()} تمامی حقوق مادی و معنوی متعلق به فروشگاه مواد غذایی ناما (NAMA FOOD PRODUCTS) می‌باشد.
+          <div className="flex items-center justify-center sm:justify-start gap-2">
+            <img 
+              src={namaLogoImg} 
+              alt="لوگو فروشگاه ناما" 
+              className="w-6 h-6 rounded-full object-cover border border-[#D4A340]/40 shrink-0 shadow-sm"
+              referrerPolicy="no-referrer"
+            />
+            <span>
+              © {new Date().getFullYear()} تمامی حقوق مادی و معنوی متعلق به فروشگاه مواد غذایی ناما (NAMA FOOD PRODUCTS) می‌باشد.
+            </span>
           </div>
           <div className="flex items-center gap-1.5 font-bold text-[#D4A340]">
             <span>از نام و جان برای طعمی ماندگار</span>

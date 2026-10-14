@@ -53,8 +53,14 @@ export function getLocalSettings(): StoreSettings {
         parsed.promoSubtitle = DEFAULT_SETTINGS.promoSubtitle;
       }
       delete parsed.freeShippingThreshold;
-      if (parsed.announcement && parsed.announcement.includes('۶۰۰')) {
-        parsed.announcement = DEFAULT_SETTINGS.announcement;
+      if (
+        parsed.announcement && 
+        (parsed.announcement.includes('۶۰۰') || 
+         parsed.announcement.includes('آزمایش') || 
+         parsed.announcement.includes('ضمانت') ||
+         parsed.announcement.includes('اصیل'))
+      ) {
+        parsed.announcement = "";
       }
 
       return { ...DEFAULT_SETTINGS, ...parsed };

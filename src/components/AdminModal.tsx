@@ -2683,28 +2683,14 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                               فایل‌های فشرده آماده
                             </span>
                           </div>
-                          <p className="text-xs text-gray-600 leading-relaxed">
-                            پکیج کامل پروژه و فایل‌های نهایی آماده است؛ روی هر کدام کلیک کنید تا فوراً فایل ZIP را دانلود نمایید:
-                          </p>
-
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
-                            <a
-                              href="/nama-foods-dist.zip"
-                              download="nama-foods-dist.zip"
-                              className="p-3.5 bg-[#163826] hover:bg-[#0E2619] text-white rounded-2xl font-bold text-xs flex items-center justify-center gap-2 shadow-md transition-all text-center"
-                            >
-                              <Download className="w-4 h-4 text-[#D4A340] flex-shrink-0" />
-                              <span>دانلود خروجی آماده (dist.zip - کلودفلر و هاست)</span>
-                            </a>
-
-                            <a
-                              href="/nama-foods-source.zip"
-                              download="nama-foods-source.zip"
-                              className="p-3.5 bg-[#231709] hover:bg-black text-[#FAF7F0] rounded-2xl font-bold text-xs flex items-center justify-center gap-2 border border-[#D4A340]/40 shadow-md transition-all text-center"
-                            >
-                              <Download className="w-4 h-4 text-[#D4A340] flex-shrink-0" />
-                              <span>دانلود سورس‌کد کامل (source.zip - ورسل و گیت‌هاب)</span>
-                            </a>
+                          <div className="bg-[#FAF7F0] p-3.5 rounded-2xl border border-[#231709]/10 space-y-2 text-xs text-gray-700">
+                            <p className="font-bold text-[#163826] flex items-center gap-1.5">
+                              <Download className="w-4 h-4 text-[#D4A340]" />
+                              نحوه دریافت مستقیم فایل‌های پروژه:
+                            </p>
+                            <p className="leading-relaxed">
+                              از بالای صفحه محیط AI Studio روی آیکون <strong>Export / Download Code</strong> کلیک کنید تا کل کدهای تر و تمیز بدون فایل‌های اضافه برای شما دانلود شود. همچنین با دستور زیر در کامپیوتر یا سرور خود پوشه خروجی <code>dist</code> را برای استقرار نهایی بسازید:
+                            </p>
                           </div>
 
                           <div className="flex items-center justify-between bg-[#1E1710] text-[#E8C574] p-3 rounded-xl font-mono text-xs" dir="ltr">

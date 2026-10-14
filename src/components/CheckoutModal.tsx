@@ -450,7 +450,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                 <div>
                   <div className="flex items-center justify-between mb-1">
                     <label className="text-xs font-bold text-[#2A3F30]">
-                      شماره تلفن همراه (جهت پیامک رهگیری) *
+                      شماره تلفن همراه (جهت هماهنگی و رهگیری سفارش) *
                     </label>
                     <span className="text-[10px] text-gray-500 font-mono">
                       {cleanPhone ? `${cleanPhone.length} / ۱۱ رقم` : '۱۱ رقم با 09'}

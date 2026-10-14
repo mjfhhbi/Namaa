@@ -35,7 +35,12 @@ export const Header: React.FC<HeaderProps> = ({
   return (
     <header className="sticky top-0 z-40 bg-[#FAF7F0]/95 backdrop-blur-md border-b border-[#E8DEC9] shadow-[0_2px_15px_rgba(0,0,0,0.04)]">
       {/* Top Banner */}
-      {settings.announcement && (
+      {Boolean(
+        settings.announcement && 
+        !settings.announcement.includes('۶۰۰') && 
+        !settings.announcement.includes('آزمایش') && 
+        !settings.announcement.includes('ضمانت اصالت')
+      ) && (
         <div className="bg-gradient-to-r from-[#231709] via-[#2F1E0C] to-[#1E2D20] text-[#FAF7F2] px-4 py-2 text-xs sm:text-[13px] text-center font-medium flex items-center justify-center gap-2 shadow-inner">
           <Sparkles className="w-3.5 h-3.5 text-[#D4A340] animate-pulse" />
           <span>{settings.announcement}</span>
@@ -51,12 +56,12 @@ export const Header: React.FC<HeaderProps> = ({
       )}
 
       {/* Main Nav */}
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3.5 flex items-center justify-between gap-4">
+      <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 py-2.5 sm:py-3.5 flex items-center justify-between gap-2 sm:gap-4">
         {/* Logo and Brand */}
-        <Logo size={52} />
+        <Logo size={46} className="shrink-0" />
 
         {/* Search Input (Desktop) */}
-        <div className="hidden md:flex flex-1 max-w-md mx-6 relative">
+        <div className="hidden md:flex flex-1 max-w-md mx-4 lg:mx-6 relative">
           <input
             type="text"
             value={searchQuery}
@@ -75,47 +80,54 @@ export const Header: React.FC<HeaderProps> = ({
           )}
         </div>
 
-        {/* Action Buttons */}
-        <div className="flex items-center gap-1.5 sm:gap-2.5">
-          {/* Ambient Music Toggle (At top of page, minimal & out of the way) */}
+        {/* Action Buttons: Music, Tracking, Admin, Cart */}
+        <div className="flex items-center gap-1.5 sm:gap-2.5 shrink-0">
+          {/* 1. Ambient Music Toggle */}
           <AudioPlayer />
 
-          {/* Order Tracking Button */}
+          {/* 2. Order Tracking Button */}
           <button
+            type="button"
             onClick={onOpenTracking}
-            className="inline-flex items-center gap-1.5 px-2.5 sm:px-3.5 py-1.5 sm:py-2 text-xs sm:text-sm font-bold text-[#231709] bg-[#EDE4D4]/80 hover:bg-[#E2D6C0] rounded-full border border-[#D8CBB2] transition-colors"
+            className="shrink-0 inline-flex items-center justify-center gap-1.5 h-9 sm:h-10 px-2.5 sm:px-3.5 text-xs sm:text-sm font-bold text-[#231709] bg-[#EDE4D4]/80 hover:bg-[#E2D6C0] rounded-full border border-[#D8CBB2] transition-colors cursor-pointer active:scale-95 shadow-xs"
             title="پیگیری سفارش با کد رهگیری"
+            aria-label="پیگیری سفارش"
           >
-            <Truck className="w-4 h-4 text-[#2F4E34]" />
-            <span className="hidden sm:inline">پیگیری سفارش</span>
+            <Truck className="w-4 h-4 text-[#2F4E34] shrink-0" />
+            <span className="hidden md:inline whitespace-nowrap">پیگیری سفارش</span>
           </button>
 
-          {/* Admin Panel Button */}
+          {/* 3. Admin Panel Button */}
           <button
+            type="button"
             onClick={onOpenAdmin}
-            className="inline-flex items-center gap-1.5 px-2.5 sm:px-3.5 py-2 text-xs sm:text-sm font-bold text-[#4B3B2B] bg-[#F5EFE4] hover:bg-[#EADFCB] rounded-full border border-[#D9CDBF] transition-colors"
+            className="shrink-0 inline-flex items-center justify-center gap-1.5 h-9 sm:h-10 px-2.5 sm:px-3.5 text-xs sm:text-sm font-bold text-[#4B3B2B] bg-[#F5EFE4] hover:bg-[#EADFCB] rounded-full border border-[#D9CDBF] transition-colors cursor-pointer active:scale-95 shadow-xs"
             title="ورود به پنل مدیریت فروشگاه"
+            aria-label="پنل مدیریت"
           >
-            <KeyRound className="w-3.5 h-3.5 text-[#B8860B]" />
-            <span className="hidden sm:inline">پنل مدیریت</span>
+            <KeyRound className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-[#B8860B] shrink-0" />
+            <span className="hidden md:inline whitespace-nowrap">پنل مدیریت</span>
           </button>
 
-          {/* Shopping Cart Button */}
+          {/* 4. Shopping Cart Button */}
           <button
+            type="button"
             onClick={onOpenCart}
-            className={`relative inline-flex items-center gap-2 px-3.5 sm:px-4 py-2 text-xs sm:text-sm font-black text-white bg-[#231709] hover:bg-[#150D05] active:scale-95 rounded-full shadow-md shadow-[#231709]/20 transition-all ${
+            className={`shrink-0 relative inline-flex items-center justify-center gap-1.5 sm:gap-2 h-9 sm:h-10 px-3 sm:px-4 text-xs sm:text-sm font-black text-white bg-[#231709] hover:bg-[#150D05] active:scale-95 rounded-full shadow-md shadow-[#231709]/20 transition-all cursor-pointer ${
               isCartBumping ? 'animate-cart-wiggle ring-4 ring-[#D4A340]/60 bg-[#160E05] shadow-lg shadow-[#D4A340]/30' : ''
             }`}
+            title="مشاهده سبد خرید"
+            aria-label="سبد خرید"
           >
             {isCartBumping && (
               <span className="absolute -top-3 left-1/2 -translate-x-1/2 bg-[#D4A340] text-[#231709] text-[10px] font-black px-2 py-0.5 rounded-full shadow-lg animate-bounce pointer-events-none whitespace-nowrap z-30">
                 +۱ افزوده شد
               </span>
             )}
-            <ShoppingBag className={`w-4 h-4 text-[#D4A340] transition-transform ${isCartBumping ? 'scale-125' : ''}`} />
-            <span className="hidden sm:inline">سبد خرید</span>
+            <ShoppingBag className={`w-4 h-4 text-[#D4A340] shrink-0 transition-transform ${isCartBumping ? 'scale-125' : ''}`} />
+            <span className="hidden md:inline whitespace-nowrap">سبد خرید</span>
             {cartCount > 0 && (
-              <span className={`bg-[#D4A340] text-[#231709] text-[11px] font-black w-5 h-5 rounded-full flex items-center justify-center -mr-1 transition-all ${
+              <span className={`bg-[#D4A340] text-[#231709] text-[11px] font-black w-5 h-5 rounded-full flex items-center justify-center shrink-0 transition-all ${
                 isCartBumping ? 'scale-130 ring-2 ring-white' : ''
               }`}>
                 {cartCount}

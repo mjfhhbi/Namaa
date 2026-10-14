@@ -1,94 +1,87 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Volume2, VolumeX, Music, Sparkles } from 'lucide-react';
+import { Volume2, VolumeX } from 'lucide-react';
 
 interface AudioPlayerProps {
   className?: string;
 }
 
+// Authentic Persian traditional acoustic Santur & orchestra recording (Public Domain / CC-BY-SA, Wikimedia Commons)
+const PRIMARY_AUDIO_URL = 'https://upload.wikimedia.org/wikipedia/commons/d/df/Sadeghi-Dehlavi-Concertino_for_Santur_Full.ogg';
+
 export const AudioPlayer: React.FC<AudioPlayerProps> = ({ className = '' }) => {
   const [isPlaying, setIsPlaying] = useState(false);
-  const [volume, setVolume] = useState(0.5);
-  const audioCtxRef = useRef<AudioContext | null>(null);
-  const intervalRef = useRef<number | null>(null);
-  const gainNodeRef = useRef<GainNode | null>(null);
+  const [useSynthFallback, setUseSynthFallback] = useState(false);
 
-  // Traditional Persian relaxing scales (Dastgah Mahur & Homayoun soothing frequencies)
-  // G4, A4, B4, C5, D5, E5, F#5, G5, A5, D4, G3
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const audioCtxRef = useRef<AudioContext | null>(null);
+  const synthIntervalRef = useRef<number | null>(null);
+  const synthGainRef = useRef<GainNode | null>(null);
+
+  // Persian traditional musical scale frequencies (Dastgah Mahur & Homayoun soothing acoustic frequencies)
   const NOTES = [392.00, 440.00, 493.88, 523.25, 587.33, 659.25, 739.99, 783.99, 880.00, 293.66, 196.00];
 
-  // Pluck an authentic, warm acoustic Santur tone
-  const playTone = (freq: number, duration: number = 2.8, velocity: number = 0.35) => {
-    if (!audioCtxRef.current || !gainNodeRef.current) return;
-    const ctx = audioCtxRef.current;
-
+  // Robust acoustic synthesized Santur note fallback
+  const playSynthNote = (freq: number, duration: number = 2.5, velocity: number = 0.55) => {
     try {
+      if (!audioCtxRef.current || !synthGainRef.current) return;
+      const ctx = audioCtxRef.current;
       if (ctx.state === 'suspended') {
         ctx.resume().catch(() => {});
       }
-
       const now = ctx.currentTime;
 
-      // 1. Fundamental string oscillator
       const osc1 = ctx.createOscillator();
+      const osc2 = ctx.createOscillator();
+      const oscHarmonic = ctx.createOscillator();
+
       osc1.type = 'sine';
       osc1.frequency.setValueAtTime(freq, now);
 
-      // 2. Twin chorus string oscillator (slight detuning for authentic shimmering Santur resonance)
-      const osc2 = ctx.createOscillator();
       osc2.type = 'triangle';
-      osc2.frequency.setValueAtTime(freq * 1.003, now);
+      osc2.frequency.setValueAtTime(freq * 1.004, now); // slight chorus
 
-      // 3. Harmonic chime overtone (octave harmonic)
-      const oscHarmonic = ctx.createOscillator();
       oscHarmonic.type = 'sine';
       oscHarmonic.frequency.setValueAtTime(freq * 2, now);
 
-      // Gain envelopes for realistic hammered string decay
-      const voiceGain = ctx.createGain();
+      const noteGain = ctx.createGain();
       const harmonicGain = ctx.createGain();
 
-      // Warm acoustic low-pass filter
       const filter = ctx.createBiquadFilter();
       filter.type = 'lowpass';
-      filter.frequency.setValueAtTime(2200, now);
-      filter.Q.setValueAtTime(2.5, now);
+      filter.frequency.setValueAtTime(2600, now);
 
-      // Connect nodes cleanly
-      osc1.connect(voiceGain);
-      osc2.connect(voiceGain);
-      voiceGain.connect(filter);
+      osc1.connect(noteGain);
+      osc2.connect(noteGain);
+      noteGain.connect(filter);
 
       oscHarmonic.connect(harmonicGain);
       harmonicGain.connect(filter);
 
-      filter.connect(gainNodeRef.current);
+      filter.connect(synthGainRef.current);
 
-      // Envelopes: instantaneous strike, natural exponential acoustic decay
-      voiceGain.gain.setValueAtTime(0.001, now);
-      voiceGain.gain.linearRampToValueAtTime(velocity, now + 0.02);
-      voiceGain.gain.setTargetAtTime(0.0001, now + 0.03, duration * 0.38);
+      noteGain.gain.setValueAtTime(0.001, now);
+      noteGain.gain.linearRampToValueAtTime(velocity, now + 0.02);
+      noteGain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
 
       harmonicGain.gain.setValueAtTime(0.001, now);
       harmonicGain.gain.linearRampToValueAtTime(velocity * 0.4, now + 0.015);
-      harmonicGain.gain.setTargetAtTime(0.0001, now + 0.025, duration * 0.22);
+      harmonicGain.gain.exponentialRampToValueAtTime(0.0001, now + duration * 0.7);
 
-      // Start & stop oscillators
       osc1.start(now);
       osc2.start(now);
       oscHarmonic.start(now);
 
-      const stopTime = now + duration + 0.2;
+      const stopTime = now + duration + 0.1;
       osc1.stop(stopTime);
       osc2.stop(stopTime);
       oscHarmonic.stop(stopTime);
     } catch (e) {
-      console.warn('Web Audio note notice:', e);
+      console.warn('Synth error:', e);
     }
   };
 
-  const startMusicLoop = () => {
+  const startSynthLoop = () => {
     let step = 0;
-    // Soothing Iranian Mahur melody phrases (نغمه آرامش‌بخش ماهور)
     const melody = [
       NOTES[0], NOTES[2], NOTES[4], NOTES[7], // G4, B4, D5, G5
       NOTES[5], NOTES[4], NOTES[2], NOTES[0], // E5, D5, B4, G4
@@ -98,75 +91,86 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({ className = '' }) => {
       NOTES[9], NOTES[0], NOTES[2], NOTES[0]  // D4, G4, B4, G4
     ];
 
-    // Strike first warm tone immediately on click
-    playTone(melody[0], 3.2, 0.45);
-    // Soft deep resonant bass note (تنبور / بم سنتور)
-    playTone(NOTES[10], 4.5, 0.25);
+    playSynthNote(melody[0], 3.0, 0.6);
+    playSynthNote(NOTES[10], 4.0, 0.4);
 
-    intervalRef.current = window.setInterval(() => {
+    synthIntervalRef.current = window.setInterval(() => {
       step = (step + 1) % melody.length;
-      playTone(melody[step], 3.0, 0.38);
+      playSynthNote(melody[step], 2.8, 0.55);
 
-      // Resonant bass anchor every 4 notes
       if (step % 4 === 0) {
-        playTone(NOTES[10], 4.2, 0.22);
+        playSynthNote(NOTES[10], 3.8, 0.35);
       }
-      // Light high harmonic pluck on 8th beats
       if (step % 8 === 4) {
-        playTone(NOTES[7], 2.2, 0.18);
+        playSynthNote(NOTES[7], 2.0, 0.3);
       }
-    }, 1150);
+    }, 1200);
   };
 
-  const stopMusicLoop = () => {
-    if (intervalRef.current !== null) {
-      clearInterval(intervalRef.current);
-      intervalRef.current = null;
+  const stopSynthLoop = () => {
+    if (synthIntervalRef.current !== null) {
+      clearInterval(synthIntervalRef.current);
+      synthIntervalRef.current = null;
     }
   };
 
+  const initSynth = () => {
+    if (!audioCtxRef.current) {
+      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+      if (AudioCtx) {
+        const ctx = new AudioCtx();
+        const master = ctx.createGain();
+        master.gain.setValueAtTime(0.85, ctx.currentTime);
+        master.connect(ctx.destination);
+        audioCtxRef.current = ctx;
+        synthGainRef.current = master;
+      }
+    }
+  };
+
+  // Toggle Play / Pause with instant user interaction
   const togglePlay = async () => {
-    try {
-      if (isPlaying) {
-        stopMusicLoop();
-        if (audioCtxRef.current && audioCtxRef.current.state === 'running') {
-          await audioCtxRef.current.suspend();
-        }
-        setIsPlaying(false);
-      } else {
-        // Initialize or resume AudioContext directly within user tap handler
-        if (!audioCtxRef.current) {
-          const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
-          const ctx = new AudioContextClass();
-          const masterGain = ctx.createGain();
-          masterGain.gain.setValueAtTime(0.7, ctx.currentTime);
-          masterGain.connect(ctx.destination);
+    if (isPlaying) {
+      // Pause
+      if (audioRef.current) {
+        audioRef.current.pause();
+      }
+      stopSynthLoop();
+      if (audioCtxRef.current && audioCtxRef.current.state === 'running') {
+        audioCtxRef.current.suspend().catch(() => {});
+      }
+      setIsPlaying(false);
+    } else {
+      // Start playing
+      setIsPlaying(true);
 
-          audioCtxRef.current = ctx;
-          gainNodeRef.current = masterGain;
+      let playedSuccessfully = false;
+      if (audioRef.current) {
+        try {
+          audioRef.current.volume = 0.85;
+          await audioRef.current.play();
+          playedSuccessfully = true;
+          setUseSynthFallback(false);
+        } catch (err) {
+          console.warn('HTML5 Audio playback prevented, falling back to Web Audio synth:', err);
         }
+      }
 
-        if (audioCtxRef.current.state === 'suspended') {
+      if (!playedSuccessfully) {
+        setUseSynthFallback(true);
+        initSynth();
+        if (audioCtxRef.current && audioCtxRef.current.state === 'suspended') {
           await audioCtxRef.current.resume();
         }
-
-        startMusicLoop();
-        setIsPlaying(true);
+        startSynthLoop();
       }
-    } catch (err) {
-      console.error('Audio toggle error:', err);
     }
   };
 
-  useEffect(() => {
-    if (gainNodeRef.current && audioCtxRef.current) {
-      gainNodeRef.current.gain.setValueAtTime(0.7, audioCtxRef.current.currentTime);
-    }
-  }, []);
-
+  // Clean up on unmount
   useEffect(() => {
     return () => {
-      stopMusicLoop();
+      stopSynthLoop();
       if (audioCtxRef.current) {
         audioCtxRef.current.close().catch(() => {});
       }
@@ -174,33 +178,58 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({ className = '' }) => {
   }, []);
 
   return (
-    <div className={`inline-flex items-center gap-1.5 ${className}`}>
+    <div className={`shrink-0 inline-flex items-center ${className}`}>
+      {/* Hidden HTML5 Audio Element */}
+      <audio
+        ref={audioRef}
+        src={PRIMARY_AUDIO_URL}
+        loop
+        preload="auto"
+        onEnded={() => {
+          if (audioRef.current) {
+            audioRef.current.currentTime = 0;
+            audioRef.current.play().catch(() => {});
+          }
+        }}
+        onError={() => {
+          console.warn('Audio tag error, switching to synth');
+          if (isPlaying) {
+            setUseSynthFallback(true);
+            initSynth();
+            startSynthLoop();
+          }
+        }}
+      />
+
+      {/* Main Music Toggle Button without percentage or clutter */}
       <button
         type="button"
         onClick={togglePlay}
-        className={`inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 sm:py-2 rounded-full text-xs font-bold transition-all border cursor-pointer ${
-          isPlaying 
-            ? 'bg-[#231709] text-[#E8C574] border-[#D4A340] shadow-sm ring-2 ring-[#D4A340]/40 animate-pulse' 
-            : 'bg-[#EDE4D4]/80 hover:bg-[#E2D6C0] text-[#5C4B3C] border-[#D8CBB2]'
+        className={`shrink-0 inline-flex items-center justify-center gap-1.5 h-9 sm:h-10 px-2.5 sm:px-3.5 rounded-full text-xs font-bold transition-all border shadow-xs cursor-pointer select-none active:scale-95 ${
+          isPlaying
+            ? 'bg-[#231709] text-[#E8C574] border-[#D4A340] ring-2 ring-[#D4A340]/40 shadow-md shadow-[#231709]/20'
+            : 'bg-[#EDE4D4]/90 hover:bg-[#E2D6C0] text-[#4B3B2B] border-[#D8CBB2]'
         }`}
-        title={isPlaying ? 'قطع موسیقی سنتی و آرامش‌بخش' : 'پخش موسیقی سنتی و آرامش‌بخش ناما (سنتور ملایم)'}
-        aria-label="پخش یا قطع موسیقی آرامش‌بخش"
+        title={isPlaying ? 'توقف پخش موسیقی' : 'پخش موسیقی سنتی اصیل (سنتور)'}
+        aria-label="پخش یا توقف موسیقی"
       >
         {isPlaying ? (
-          <Volume2 className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-[#D4A340]" />
+          <Volume2 className="w-4 h-4 text-[#D4A340] animate-pulse shrink-0" />
         ) : (
-          <VolumeX className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-[#7A6A5A]" />
+          <VolumeX className="w-4 h-4 text-[#7A6A5A] shrink-0" />
         )}
 
-        <span className="hidden sm:inline text-[11px] font-bold">
-          {isPlaying ? 'نغمه آرامش (سنتور)' : 'موسیقی'}
+        {/* Text hidden on small screens so all 4 buttons fit side by side */}
+        <span className="hidden md:inline text-xs font-bold whitespace-nowrap">
+          {isPlaying ? (useSynthFallback ? 'نغمه سنتی' : 'موسیقی سنتی') : 'موسیقی'}
         </span>
 
+        {/* Subtle animated sound wave bars when playing */}
         {isPlaying && (
-          <div className="flex items-center gap-0.5 mr-0.5">
-            <span className="w-1 h-2.5 bg-[#D4A340] rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-            <span className="w-1 h-3.5 bg-[#D4A340] rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-            <span className="w-1 h-2 bg-[#D4A340] rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+          <div className="flex items-end gap-0.5 h-3 px-0.5 shrink-0">
+            <span className="w-0.5 h-2.5 bg-[#D4A340] rounded-full animate-pulse" style={{ animationDuration: '0.6s' }} />
+            <span className="w-0.5 h-3.5 bg-[#E8C574] rounded-full animate-pulse" style={{ animationDuration: '0.4s' }} />
+            <span className="w-0.5 h-2 bg-[#D4A340] rounded-full animate-pulse" style={{ animationDuration: '0.8s' }} />
           </div>
         )}
       </button>
