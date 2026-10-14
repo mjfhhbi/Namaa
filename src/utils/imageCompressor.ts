@@ -38,7 +38,15 @@ export async function compressImage(file: File, maxWidth = 1000, quality = 0.75)
           }
 
           ctx.drawImage(img, 0, 0, width, height);
-          const dataUrl = canvas.toDataURL('image/jpeg', quality);
+          let dataUrl = '';
+          try {
+            dataUrl = canvas.toDataURL('image/webp', quality);
+            if (!dataUrl.startsWith('data:image/webp')) {
+              dataUrl = canvas.toDataURL('image/jpeg', quality);
+            }
+          } catch {
+            dataUrl = canvas.toDataURL('image/jpeg', quality);
+          }
           resolve(dataUrl);
         } catch (err) {
           resolve(event.target?.result as string);

@@ -9,13 +9,15 @@ interface AudioPlayerProps {
 const PRIMARY_AUDIO_URL = 'https://upload.wikimedia.org/wikipedia/commons/d/df/Sadeghi-Dehlavi-Concertino_for_Santur_Full.ogg';
 
 export const AudioPlayer: React.FC<AudioPlayerProps> = ({ className = '' }) => {
-  const [isPlaying, setIsPlaying] = useState(false);
+  // Autoplay by default: plays automatically unless the user explicitly stops it
+  const [isPlaying, setIsPlaying] = useState(true);
   const [useSynthFallback, setUseSynthFallback] = useState(false);
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
   const synthIntervalRef = useRef<number | null>(null);
   const synthGainRef = useRef<GainNode | null>(null);
+  const userHasMutedRef = useRef<boolean>(false);
 
   // Persian traditional musical scale frequencies (Dastgah Mahur & Homayoun soothing acoustic frequencies)
   const NOTES = [392.00, 440.00, 493.88, 523.25, 587.33, 659.25, 739.99, 783.99, 880.00, 293.66, 196.00];
@@ -128,48 +130,80 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({ className = '' }) => {
     }
   };
 
-  // Toggle Play / Pause with instant user interaction
-  const togglePlay = async () => {
-    if (isPlaying) {
-      // Pause
-      if (audioRef.current) {
-        audioRef.current.pause();
-      }
-      stopSynthLoop();
-      if (audioCtxRef.current && audioCtxRef.current.state === 'running') {
-        audioCtxRef.current.suspend().catch(() => {});
-      }
-      setIsPlaying(false);
-    } else {
-      // Start playing
-      setIsPlaying(true);
+  const startAudioPlayback = async () => {
+    if (userHasMutedRef.current) return;
+    setIsPlaying(true);
 
-      let playedSuccessfully = false;
-      if (audioRef.current) {
+    let playedSuccessfully = false;
+    if (audioRef.current) {
+      try {
+        audioRef.current.volume = 0.85;
+        await audioRef.current.play();
+        playedSuccessfully = true;
+        setUseSynthFallback(false);
+      } catch (err) {
+        console.warn('Audio tag autoplay restricted by browser policy, ready for gesture:', err);
+      }
+    }
+
+    if (!playedSuccessfully) {
+      setUseSynthFallback(true);
+      initSynth();
+      if (audioCtxRef.current && audioCtxRef.current.state === 'suspended') {
         try {
-          audioRef.current.volume = 0.85;
-          await audioRef.current.play();
-          playedSuccessfully = true;
-          setUseSynthFallback(false);
-        } catch (err) {
-          console.warn('HTML5 Audio playback prevented, falling back to Web Audio synth:', err);
+          await audioCtxRef.current.resume();
+        } catch {
+          // Wait for user gesture
         }
       }
-
-      if (!playedSuccessfully) {
-        setUseSynthFallback(true);
-        initSynth();
-        if (audioCtxRef.current && audioCtxRef.current.state === 'suspended') {
-          await audioCtxRef.current.resume();
-        }
+      if (audioCtxRef.current && audioCtxRef.current.state === 'running') {
         startSynthLoop();
       }
     }
   };
 
-  // Clean up on unmount
+  const stopAudioPlayback = () => {
+    if (audioRef.current) {
+      audioRef.current.pause();
+    }
+    stopSynthLoop();
+    if (audioCtxRef.current && audioCtxRef.current.state === 'running') {
+      audioCtxRef.current.suspend().catch(() => {});
+    }
+    setIsPlaying(false);
+  };
+
+  // Toggle Play / Pause on user button click
+  const togglePlay = async () => {
+    if (isPlaying) {
+      // User explicitly stopped the music
+      userHasMutedRef.current = true;
+      stopAudioPlayback();
+    } else {
+      // User explicitly re-enabled music
+      userHasMutedRef.current = false;
+      await startAudioPlayback();
+    }
+  };
+
+  // Autoplay by default on mount + fallback on first user gesture
   useEffect(() => {
+    // Attempt direct autoplay
+    startAudioPlayback();
+
+    // Browser policy fallback: If unmuted autoplay is blocked by Chrome/Safari/Firefox,
+    // trigger playback automatically on the user's very first touch or interaction on page
+    const handleFirstInteraction = () => {
+      if (!userHasMutedRef.current) {
+        startAudioPlayback();
+      }
+    };
+
+    const events = ['click', 'touchstart', 'keydown', 'scroll'];
+    events.forEach(evt => window.addEventListener(evt, handleFirstInteraction, { once: true, passive: true }));
+
     return () => {
+      events.forEach(evt => window.removeEventListener(evt, handleFirstInteraction));
       stopSynthLoop();
       if (audioCtxRef.current) {
         audioCtxRef.current.close().catch(() => {});
@@ -186,14 +220,14 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({ className = '' }) => {
         loop
         preload="auto"
         onEnded={() => {
-          if (audioRef.current) {
+          if (audioRef.current && !userHasMutedRef.current) {
             audioRef.current.currentTime = 0;
             audioRef.current.play().catch(() => {});
           }
         }}
         onError={() => {
           console.warn('Audio tag error, switching to synth');
-          if (isPlaying) {
+          if (isPlaying && !userHasMutedRef.current) {
             setUseSynthFallback(true);
             initSynth();
             startSynthLoop();
@@ -201,7 +235,7 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({ className = '' }) => {
         }}
       />
 
-      {/* Main Music Toggle Button without percentage or clutter */}
+      {/* Main Music Toggle Button */}
       <button
         type="button"
         onClick={togglePlay}
@@ -210,7 +244,7 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({ className = '' }) => {
             ? 'bg-[#231709] text-[#E8C574] border-[#D4A340] ring-2 ring-[#D4A340]/40 shadow-md shadow-[#231709]/20'
             : 'bg-[#EDE4D4]/90 hover:bg-[#E2D6C0] text-[#4B3B2B] border-[#D8CBB2]'
         }`}
-        title={isPlaying ? 'توقف پخش موسیقی' : 'پخش موسیقی سنتی اصیل (سنتور)'}
+        title={isPlaying ? 'توقف پخش موسیقی' : 'پخش موسیقی سنتی اصیل'}
         aria-label="پخش یا توقف موسیقی"
       >
         {isPlaying ? (
@@ -219,9 +253,9 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({ className = '' }) => {
           <VolumeX className="w-4 h-4 text-[#7A6A5A] shrink-0" />
         )}
 
-        {/* Text hidden on small screens so all 4 buttons fit side by side */}
+        {/* Label */}
         <span className="hidden md:inline text-xs font-bold whitespace-nowrap">
-          {isPlaying ? (useSynthFallback ? 'نغمه سنتی' : 'موسیقی سنتی') : 'موسیقی'}
+          {isPlaying ? 'موسیقی' : 'قطع صدا'}
         </span>
 
         {/* Subtle animated sound wave bars when playing */}

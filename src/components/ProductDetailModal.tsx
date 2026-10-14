@@ -14,6 +14,8 @@ import {
   Heart
 } from 'lucide-react';
 
+import { LazyImage } from './LazyImage';
+
 interface ProductDetailModalProps {
   product: Product | null;
   onClose: () => void;
@@ -53,12 +55,13 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
         <div className="grid grid-cols-1 md:grid-cols-12">
           {/* Product Image Column */}
           <div className="md:col-span-5 relative bg-[#EDE4D4] min-h-[280px] md:min-h-[420px]">
-            <img
+            <LazyImage
               src={product.image}
               alt={product.name}
+              containerClassName="w-full h-full min-h-[280px] md:min-h-[420px]"
               className="w-full h-full object-cover"
             />
-            <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent md:hidden" />
+            <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent md:hidden pointer-events-none" />
             
             <div className="absolute bottom-4 right-4 flex flex-wrap gap-2">
               {product.isOrganic && (

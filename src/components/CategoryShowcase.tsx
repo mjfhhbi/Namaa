@@ -2,6 +2,8 @@ import React from 'react';
 import { ProductCategory, Product, StoreSettings } from '../types';
 import { ArrowLeft, Sparkles, FolderPlus } from 'lucide-react';
 
+import { LazyImage } from './LazyImage';
+
 interface CategoryShowcaseProps {
   products: Product[];
   settings?: StoreSettings;
@@ -90,9 +92,10 @@ export const CategoryShowcase: React.FC<CategoryShowcaseProps> = ({
               {/* Image Container */}
               <div className="relative h-36 sm:h-44 overflow-hidden bg-[#FAF7F0]">
                 {cat.image ? (
-                  <img
+                  <LazyImage
                     src={cat.image}
                     alt={cat.label}
+                    containerClassName="w-full h-full"
                     className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
                   />
                 ) : (
@@ -100,7 +103,7 @@ export const CategoryShowcase: React.FC<CategoryShowcaseProps> = ({
                     🌿
                   </div>
                 )}
-                <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/30 to-transparent" />
+                <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/30 to-transparent pointer-events-none" />
 
                 <div className="absolute bottom-3 right-3 text-white text-right">
                   <h3 className="text-sm sm:text-base font-black leading-tight drop-shadow-md">

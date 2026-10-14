@@ -85,13 +85,9 @@ export function getLocalProducts(): Product[] {
     if (raw !== null) {
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed)) {
+        const legacyMockIds = new Set(['prod-1','prod-2','prod-3','prod-4','prod-5','prod-6','prod-7','prod-8','prod-9','prod-10','prod-11','prod-12']);
         return parsed.filter(
-          (p: any) =>
-            !p.id?.startsWith('prod-') &&
-            !p.id?.includes('honey') &&
-            !p.id?.includes('date') &&
-            !p.title?.includes('عسل') &&
-            !p.title?.includes('خرما')
+          (p: any) => p && p.id && !legacyMockIds.has(p.id)
         );
       }
     }
@@ -198,7 +194,7 @@ export async function fetchProducts(): Promise<Product[]> {
 
 
 export async function saveProduct(product: Product): Promise<void> {
-  // Update local
+  // Update local immediately so UI reflects product instantly
   const current = getLocalProducts();
   const index = current.findIndex(p => p.id === product.id);
   let updated: Product[];
@@ -215,7 +211,7 @@ export async function saveProduct(product: Product): Promise<void> {
   try {
     await setDoc(doc(db, path, product.id), product);
   } catch (error) {
-    handleFirestoreError(error, OperationType.WRITE, `${path}/${product.id}`);
+    console.warn('Firestore write warning:', error);
   }
 }
 
@@ -229,7 +225,7 @@ export async function deleteProduct(productId: string): Promise<void> {
   try {
     await deleteDoc(doc(db, path, productId));
   } catch (error) {
-    handleFirestoreError(error, OperationType.DELETE, `${path}/${productId}`);
+    console.warn('Firestore delete warning:', error);
   }
 }
 

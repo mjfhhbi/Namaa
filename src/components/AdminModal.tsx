@@ -399,12 +399,29 @@ export const AdminModal: React.FC<AdminModalProps> = ({
       return;
     }
 
-    const chosenCategory = editingProduct.category || formSettings.customCategories?.[0]?.id || 'tea';
+    let chosenCategory = (editingProduct.category || '').trim();
+    if (!chosenCategory) {
+      chosenCategory = formSettings.customCategories?.[0]?.id || 'organic';
+    }
     const matchingCat = formSettings.customCategories?.find(c => c.id === chosenCategory || c.name === chosenCategory);
-    const categoryLabel = matchingCat ? matchingCat.name : (editingProduct.categoryLabel || chosenCategory);
+    let categoryLabel = matchingCat ? matchingCat.name : (editingProduct.categoryLabel || chosenCategory);
+
+    // If new category, auto-register it to store categories so it appears in navigation
+    if (!matchingCat && chosenCategory) {
+      const newCat = {
+        id: chosenCategory,
+        name: editingProduct.categoryLabel || chosenCategory,
+        icon: '🌿'
+      };
+      const updatedCategories = [...(formSettings.customCategories || []), newCat];
+      const updatedSettings = { ...formSettings, customCategories: updatedCategories };
+      setFormSettings(updatedSettings);
+      onUpdateSettings(updatedSettings);
+      categoryLabel = newCat.name;
+    }
 
     const finalProduct: Product = {
-      id: editingProduct.id || `prod-${Date.now()}`,
+      id: editingProduct.id || `product_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
       name: editingProduct.name.trim(),
       category: chosenCategory,
       categoryLabel: categoryLabel,
@@ -429,13 +446,14 @@ export const AdminModal: React.FC<AdminModalProps> = ({
     };
     onSaveProduct(finalProduct);
     setEditingProduct(null);
+    setProductFormError(null);
   };
 
   // Duplicate product
   const handleDuplicateProduct = (prod: Product) => {
     const duplicated: Product = {
       ...prod,
-      id: `prod-${Date.now()}`,
+      id: `product_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
       name: `${prod.name} (کپی)`,
       createdAt: new Date().toISOString(),
     };
@@ -1298,10 +1316,10 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                           const firstCat = formSettings.customCategories?.[0];
                           setEditingProduct({
                             name: '',
-                            category: firstCat ? firstCat.id : 'tea',
-                            categoryLabel: firstCat ? firstCat.name : 'چای',
-                            price: 180000,
-                            weight: 'بسته ۲۵۰ گرمی',
+                            category: firstCat ? firstCat.id : 'organic',
+                            categoryLabel: firstCat ? firstCat.name : 'محصولات ارگانیک و طبیعی',
+                            price: 0,
+                            weight: 'بسته استاندارد',
                             stock: 25,
                             isOrganic: true,
                             isFeatured: true,
@@ -1399,30 +1417,69 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                                 </button>
                               </div>
                             ) : (
-                              <select
-                                value={editingProduct.category || formSettings.customCategories?.[0]?.id || ''}
-                                onChange={(e) => {
-                                  const val = e.target.value;
-                                  if (val === '__NEW__') {
-                                    setIsAddingNewCatInline(true);
-                                  } else {
-                                    const found = formSettings.customCategories?.find(c => c.id === val);
+                              <div className="space-y-1.5">
+                                <select
+                                  value={editingProduct.category || ''}
+                                  onChange={(e) => {
+                                    const val = e.target.value;
+                                    if (val === '__NEW__') {
+                                      setIsAddingNewCatInline(true);
+                                    } else {
+                                      const found = formSettings.customCategories?.find(c => c.id === val);
+                                      const fallbackLabels: Record<string, string> = {
+                                        organic: 'محصولات ارگانیک و طبیعی',
+                                        tea: 'چای و دمنوش‌های گیاهی',
+                                        herbal: 'عرقیات سنتی',
+                                        spices: 'ادویه و چاشنی ناب',
+                                        nuts: 'خشکبار و آجیل اعلا',
+                                        oil: 'روغن‌های فرابکر گیاهی',
+                                      };
+                                      const label = found ? found.name : (fallbackLabels[val] || val);
+                                      setEditingProduct({
+                                        ...editingProduct,
+                                        category: val,
+                                        categoryLabel: label
+                                      });
+                                    }
+                                  }}
+                                  className="w-full bg-[#FAF8F3] border rounded-xl px-3 py-2 text-xs font-bold"
+                                >
+                                  {formSettings.customCategories && formSettings.customCategories.length > 0 ? (
+                                    formSettings.customCategories.map((cat) => (
+                                      <option key={cat.id} value={cat.id}>
+                                        {cat.icon || '🌿'} {cat.name}
+                                      </option>
+                                    ))
+                                  ) : (
+                                    <>
+                                      <option value="organic">🌿 محصولات ارگانیک و طبیعی</option>
+                                      <option value="tea">🍵 چای و دمنوش‌های گیاهی</option>
+                                      <option value="herbal">🌸 عرقیات سنتی</option>
+                                      <option value="spices">🧂 ادویه و چاشنی ناب</option>
+                                      <option value="nuts">🥜 خشکبار و آجیل اعلا</option>
+                                      <option value="oil">🫒 روغن‌های فرابکر گیاهی</option>
+                                    </>
+                                  )}
+                                  <option value="__NEW__">➕ تایپ دسته‌بندی دلخواه جدید...</option>
+                                </select>
+
+                                {/* Direct custom category input if user wants something specific */}
+                                <input
+                                  type="text"
+                                  value={editingProduct.categoryLabel || ''}
+                                  onChange={(e) => {
+                                    const text = e.target.value;
+                                    const slug = text.trim().toLowerCase().replace(/\s+/g, '_') || 'cat';
                                     setEditingProduct({
                                       ...editingProduct,
-                                      category: val,
-                                      categoryLabel: found ? found.name : val
+                                      category: slug,
+                                      categoryLabel: text
                                     });
-                                  }
-                                }}
-                                className="w-full bg-[#FAF8F3] border rounded-xl px-3 py-2 text-xs font-bold"
-                              >
-                                {(formSettings.customCategories || []).map((cat) => (
-                                  <option key={cat.id} value={cat.id}>
-                                    {cat.icon || '🍵'} {cat.name}
-                                  </option>
-                                ))}
-                                <option value="__NEW__">➕ ایجاد دسته‌بندی جدید...</option>
-                              </select>
+                                  }}
+                                  placeholder="یا عنوان دسته‌بندی دلخواه خود را بنویسید..."
+                                  className="w-full bg-white border border-gray-200 rounded-lg px-2.5 py-1 text-[11px] text-gray-700"
+                                />
+                              </div>
                             )}
                           </div>
 

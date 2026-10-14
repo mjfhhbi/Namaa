@@ -9,6 +9,8 @@ import {
   CheckCircle2
 } from 'lucide-react';
 
+import { LazyImage } from './LazyImage';
+
 interface ProductCardProps {
   product: Product;
   onAddToCart: (p: Product) => void;
@@ -33,11 +35,11 @@ export const ProductCard: React.FC<ProductCardProps> = ({
           onClick={() => onOpenDetails(product)}
           className="relative h-56 sm:h-60 w-full overflow-hidden bg-[#FAF6EE] cursor-pointer"
         >
-          <img
+          <LazyImage
             src={product.image}
             alt={product.name}
+            containerClassName="w-full h-full"
             className="w-full h-full object-cover group-hover:scale-108 transition-transform duration-700 ease-out"
-            loading="lazy"
           />
           <div className="absolute inset-0 bg-gradient-to-t from-black/50 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
 

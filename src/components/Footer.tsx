@@ -1,7 +1,7 @@
 import React from 'react';
 import { Logo } from './Logo';
 import { StoreSettings } from '../types';
-import namaLogoImg from '../assets/images/nama_store_logo_1791976961130.jpg';
+import namaLogoImg from '../assets/images/nama_store_logo_1791976961130.webp';
 import { 
   PhoneCall, 
   Send, 

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import namaLogoImg from '../assets/images/nama_store_logo_1791976961130.jpg';
+import namaLogoImg from '../assets/images/nama_store_logo_1791976961130.webp';
 
 interface LogoProps {
   size?: number;
