@@ -102,7 +102,6 @@ export interface DiscountCode {
 export interface StoreSettings {
   storeName: string;
   slogan: string;
-  adminPassword: string; // default "1383"
   // اطلاعات کارت بانکی
   cardNumber: string;
   cardHolder: string;

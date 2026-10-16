@@ -16,7 +16,7 @@ import {
   Copy,
   Check
 } from 'lucide-react';
-import { searchOrder, updateOrderStatus } from '../services/storeService';
+import { searchOrder, updateOrderStatus, getMyPlacedOrders } from '../services/storeService';
 import { compressImage } from '../utils/imageCompressor';
 
 interface OrderTrackingModalProps {
@@ -54,10 +54,21 @@ export const OrderTrackingModal: React.FC<OrderTrackingModalProps> = ({
   onOrderUpdated,
 }) => {
   const [query, setQuery] = useState('');
+  const [phone, setPhone] = useState('');
   const [loading, setLoading] = useState(false);
   const [order, setOrder] = useState<Order | null>(null);
   const [searched, setSearched] = useState(false);
+  const [searchError, setSearchError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [myRecentOrders, setMyRecentOrders] = useState<Order[]>([]);
+
+  // Load recent orders placed on this device
+  React.useEffect(() => {
+    if (isOpen) {
+      const recents = getMyPlacedOrders();
+      setMyRecentOrders(recents);
+    }
+  }, [isOpen]);
 
   // Late receipt upload state
   const [lateReceipt, setLateReceipt] = useState('');
@@ -69,15 +80,26 @@ export const OrderTrackingModal: React.FC<OrderTrackingModalProps> = ({
 
   if (!isOpen) return null;
 
-  const handleSearch = async (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
-    if (!query.trim()) return;
+  const handleSearch = async (orderIdToSearch?: string, phoneToSearch?: string) => {
+    const id = (orderIdToSearch !== undefined ? orderIdToSearch : query).trim();
+    const ph = (phoneToSearch !== undefined ? phoneToSearch : phone).trim();
+    if (!id) return;
 
     setLoading(true);
     setSearched(true);
-    const result = await searchOrder(query);
-    setOrder(result);
-    setLoading(false);
+    setSearchError(null);
+    try {
+      const result = await searchOrder(id, ph);
+      setOrder(result);
+      if (!result) {
+        setSearchError('سفارشی با این مشخصات یافت نشد. لطفاً کد سفارش و شماره همراه را بررسی کنید.');
+      }
+    } catch (err: any) {
+      setSearchError(err?.message || 'خطا در استعلام سفارش');
+      setOrder(null);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleLateUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -172,7 +194,7 @@ export const OrderTrackingModal: React.FC<OrderTrackingModalProps> = ({
 
         <div className="p-5 sm:p-7 space-y-6 max-h-[80vh] overflow-y-auto">
           {/* Search Box */}
-          <form onSubmit={handleSearch} className="flex gap-2">
+          <form onSubmit={(e) => { e.preventDefault(); handleSearch(); }} className="flex gap-2">
             <input
               type="text"
               value={query}

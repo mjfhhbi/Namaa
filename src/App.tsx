@@ -268,15 +268,20 @@ export default function App() {
     const matchesCategory = activeCategory === 'all' || p.category === activeCategory;
     const query = searchQuery.trim().toLowerCase();
     const matchesQuery = !query || 
-      p.name.toLowerCase().includes(query) || 
-      p.shortDesc.toLowerCase().includes(query) || 
-      p.description.toLowerCase().includes(query) ||
-      p.origin.toLowerCase().includes(query);
+      (p.name && p.name.toLowerCase().includes(query)) || 
+      (p.shortDesc && p.shortDesc.toLowerCase().includes(query)) || 
+      (p.description && p.description.toLowerCase().includes(query)) ||
+      (p.origin && p.origin.toLowerCase().includes(query)) ||
+      (p.categoryLabel && p.categoryLabel.toLowerCase().includes(query));
     return matchesCategory && matchesQuery;
   }).sort((a, b) => {
-    if (sortBy === 'price_asc') return a.price - b.price;
-    if (sortBy === 'price_desc') return b.price - a.price;
-    if (sortBy === 'newest') return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+    if (sortBy === 'price_asc') return (a.price || 0) - (b.price || 0);
+    if (sortBy === 'price_desc') return (b.price || 0) - (a.price || 0);
+    if (sortBy === 'newest') {
+      const timeB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+      const timeA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+      return timeB - timeA;
+    }
     // Default: popular
     if (a.isPopular && !b.isPopular) return -1;
     if (!a.isPopular && b.isPopular) return 1;

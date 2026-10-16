@@ -46,12 +46,15 @@ import {
   Store,
   MapPin,
   RefreshCw,
-  Sliders
+  Sliders,
+  ShieldCheck
 } from 'lucide-react';
 import { sendNtfyNotification } from '../services/storeService';
 import { DEFAULT_SETTINGS } from '../data/defaultProducts';
 import { PRESET_IMAGE_OPTIONS } from '../data/productImages';
 import { compressImage } from '../utils/imageCompressor';
+import { doc, setDoc } from 'firebase/firestore';
+import { db, auth, googleProvider, signInWithPopup, signOut, onAuthStateChanged, User } from '../firebase';
 
 interface AdminModalProps {
   isOpen: boolean;
@@ -84,8 +87,109 @@ export const AdminModal: React.FC<AdminModalProps> = ({
   onUpdateSettings,
 }) => {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [authMethod, setAuthMethod] = useState<'firebase_google' | 'pin' | null>(null);
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [isLoggingInGoogle, setIsLoggingInGoogle] = useState(false);
+  const [googleLoginError, setGoogleLoginError] = useState<string | null>(null);
   const [passwordInput, setPasswordInput] = useState('');
   const [loginError, setLoginError] = useState(false);
+
+  // Monitor Firebase Auth state
+  React.useEffect(() => {
+    const unsub = onAuthStateChanged(auth, async (user) => {
+      if (user) {
+        if (user.email === 'matinjahanbani2024@gmail.com') {
+          setCurrentUser(user);
+          setIsAuthenticated(true);
+          setAuthMethod('firebase_google');
+          try {
+            const token = await user.getIdToken();
+            sessionStorage.setItem('nama_admin_token', token);
+          } catch {}
+        } else {
+          await signOut(auth);
+          setIsAuthenticated(false);
+          setCurrentUser(null);
+          setGoogleLoginError('حساب گوگل وارد شده دسترسی مدیریت فروشگاه ناما را ندارد.');
+        }
+      }
+    });
+    return () => unsub();
+  }, []);
+
+  const handleGoogleLogin = async () => {
+    setIsLoggingInGoogle(true);
+    setGoogleLoginError(null);
+    try {
+      const res = await signInWithPopup(auth, googleProvider);
+      if (res.user) {
+        if (res.user.email !== 'matinjahanbani2024@gmail.com') {
+          await signOut(auth);
+          setIsAuthenticated(false);
+          setCurrentUser(null);
+          setGoogleLoginError('حساب گوگل وارد شده دسترسی مدیریت ندارد.');
+          return;
+        }
+        setIsAuthenticated(true);
+        setCurrentUser(res.user);
+        setAuthMethod('firebase_google');
+        setFormSettings({ ...settings });
+        try {
+          const token = await res.user.getIdToken();
+          sessionStorage.setItem('nama_admin_token', token);
+          await setDoc(doc(db, 'admins', res.user.uid), {
+            uid: res.user.uid,
+            email: res.user.email,
+            displayName: res.user.displayName,
+            role: 'admin',
+            lastLogin: new Date().toISOString()
+          }, { merge: true });
+        } catch (e) {
+          console.warn('Admin registry notice:', e);
+        }
+      }
+    } catch (err: any) {
+      console.warn('Google sign-in error:', err);
+      setGoogleLoginError(err?.message || 'خطا در احراز هویت با حساب گوگل');
+    } finally {
+      setIsLoggingInGoogle(false);
+    }
+  };
+
+  const handleLogout = async () => {
+    try {
+      await signOut(auth);
+    } catch {}
+    sessionStorage.removeItem('nama_admin_token');
+    setIsAuthenticated(false);
+    setCurrentUser(null);
+    setAuthMethod(null);
+  };
+
+  // Handle PIN Login fallback via Server API
+  const handlePinLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoginError(false);
+    try {
+      const res = await fetch('/api/admin/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pin: passwordInput.trim() }),
+      });
+      const data = await res.json();
+      if (res.ok && data.token) {
+        sessionStorage.setItem('nama_admin_token', data.token);
+        setIsAuthenticated(true);
+        setAuthMethod('pin');
+        setLoginError(false);
+        setFormSettings({ ...settings });
+      } else {
+        setLoginError(true);
+      }
+    } catch {
+      setLoginError(true);
+    }
+  };
 
   // Tabs
   type TabType = 'dashboard' | 'orders' | 'products' | 'categories' | 'discounts' | 'customers' | 'cms' | 'settings';
@@ -102,6 +206,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
   const [productCategoryFilter, setProductCategoryFilter] = useState<string>('all');
   const [productStockFilter, setProductStockFilter] = useState<'all' | 'in_stock' | 'out_of_stock'>('all');
   const [productFormError, setProductFormError] = useState<string | null>(null);
+  const [productSuccessMessage, setProductSuccessMessage] = useState<string | null>(null);
   const [isUploadingProductImage, setIsUploadingProductImage] = useState(false);
 
   // Category creation & editing states (Full Dynamic Category CRUD)
@@ -147,20 +252,6 @@ export const AdminModal: React.FC<AdminModalProps> = ({
     isDanger?: boolean;
     onConfirm: () => void;
   } | null>(null);
-
-  if (!isOpen) return null;
-
-  // Handle Login
-  const handleLogin = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (passwordInput.trim() === settings.adminPassword) {
-      setIsAuthenticated(true);
-      setLoginError(false);
-      setFormSettings({ ...settings });
-    } else {
-      setLoginError(true);
-    }
-  };
 
   // Metrics
   const approvedOrders = orders.filter(o => o.status !== 'cancelled' && o.status !== 'pending_receipt');
@@ -252,14 +343,10 @@ export const AdminModal: React.FC<AdminModalProps> = ({
     });
   };
 
-  // Password change handler
-  const handlePasswordChange = (e: React.FormEvent) => {
+  // Password change handler via Server API
+  const handlePasswordChange = async (e: React.FormEvent) => {
     e.preventDefault();
     setPasswordChangeMessage(null);
-    if (oldPasswordInput.trim() !== formSettings.adminPassword) {
-      setPasswordChangeMessage({ text: 'رمز عبور فعلی نادرست است.', isError: true });
-      return;
-    }
     if (newPasswordInput.length < 4) {
       setPasswordChangeMessage({ text: 'رمز عبور جدید باید حداقل ۴ رقم/حرف باشد.', isError: true });
       return;
@@ -268,13 +355,34 @@ export const AdminModal: React.FC<AdminModalProps> = ({
       setPasswordChangeMessage({ text: 'تکرار رمز عبور جدید یکسان نیست.', isError: true });
       return;
     }
-    const updated = { ...formSettings, adminPassword: newPasswordInput.trim() };
-    setFormSettings(updated);
-    onUpdateSettings(updated);
-    setPasswordChangeMessage({ text: 'رمز عبور مدیریت با موفقیت تغییر یافت ✅', isError: false });
-    setOldPasswordInput('');
-    setNewPasswordInput('');
-    setConfirmNewPasswordInput('');
+    try {
+      const token = sessionStorage.getItem('nama_admin_token');
+      const res = await fetch('/api/admin/change-pin', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+        },
+        body: JSON.stringify({
+          currentPin: oldPasswordInput.trim(),
+          newPin: newPasswordInput.trim()
+        }),
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        if (data.token) {
+          sessionStorage.setItem('nama_admin_token', data.token);
+        }
+        setPasswordChangeMessage({ text: 'رمز عبور مدیریت با موفقیت در سرور تغییر یافت ✅', isError: false });
+        setOldPasswordInput('');
+        setNewPasswordInput('');
+        setConfirmNewPasswordInput('');
+      } else {
+        setPasswordChangeMessage({ text: data.error || 'خطا در تغییر رمز عبور', isError: true });
+      }
+    } catch {
+      setPasswordChangeMessage({ text: 'خطا در برقراری ارتباط با سرور', isError: true });
+    }
   };
 
   // Product Image Upload
@@ -394,8 +502,13 @@ export const AdminModal: React.FC<AdminModalProps> = ({
   const handleProductSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setProductFormError(null);
-    if (!editingProduct?.name || editingProduct?.price === undefined || editingProduct?.price === null) {
-      setProductFormError('نام و قیمت محصول الزامی است');
+    if (!editingProduct?.name || !editingProduct.name.trim()) {
+      setProductFormError('نام محصول الزامی است');
+      return;
+    }
+    const parsedPrice = Number(editingProduct.price);
+    if (isNaN(parsedPrice) || parsedPrice <= 0) {
+      setProductFormError('لطفاً یک قیمت معتبر (بزرگتر از صفر) به تومان وارد فرمایید');
       return;
     }
 
@@ -425,28 +538,32 @@ export const AdminModal: React.FC<AdminModalProps> = ({
       name: editingProduct.name.trim(),
       category: chosenCategory,
       categoryLabel: categoryLabel,
-      price: Number(editingProduct.price),
-      originalPrice: editingProduct.originalPrice ? Number(editingProduct.originalPrice) : undefined,
-      weight: editingProduct.weight || 'بسته استاندارد',
-      shortDesc: editingProduct.shortDesc || '',
-      description: editingProduct.description || '',
+      price: parsedPrice,
+      ...(editingProduct.originalPrice && Number(editingProduct.originalPrice) > 0 
+          ? { originalPrice: Number(editingProduct.originalPrice) } 
+          : {}),
+      weight: editingProduct.weight?.trim() || 'بسته استاندارد',
+      shortDesc: editingProduct.shortDesc?.trim() || '',
+      description: editingProduct.description?.trim() || '',
       benefits: Array.isArray(editingProduct.benefits) 
         ? editingProduct.benefits 
         : (typeof editingProduct.benefits === 'string' ? (editingProduct.benefits as string).split('\n').map(s => s.trim()).filter(Boolean) : []),
-      origin: editingProduct.origin || 'ایران',
+      origin: editingProduct.origin?.trim() || 'ایران',
       stock: Number(editingProduct.stock ?? 10),
       image: editingProduct.image || PRESET_IMAGE_OPTIONS[0].url,
       isPopular: !!editingProduct.isPopular,
       isOrganic: !!editingProduct.isOrganic,
       isFeatured: !!editingProduct.isFeatured,
       isNewArrival: !!editingProduct.isNewArrival,
-      badge: editingProduct.badge || undefined,
+      ...(editingProduct.badge?.trim() ? { badge: editingProduct.badge.trim() } : {}),
       rating: editingProduct.rating ? Number(editingProduct.rating) : 5.0,
       createdAt: editingProduct.createdAt || new Date().toISOString(),
     };
     onSaveProduct(finalProduct);
     setEditingProduct(null);
     setProductFormError(null);
+    setProductSuccessMessage(`محصول «${finalProduct.name}» با موفقیت در کاتالوگ فروشگاه ذخیره گردید.`);
+    setTimeout(() => setProductSuccessMessage(null), 5000);
   };
 
   // Duplicate product
@@ -513,8 +630,9 @@ export const AdminModal: React.FC<AdminModalProps> = ({
   // Filtered Products
   const filteredProducts = products.filter(p => {
     const matchesSearch = !productSearch.trim() || 
-      p.name.toLowerCase().includes(productSearch.toLowerCase()) || 
-      p.categoryLabel.includes(productSearch);
+      (p.name && p.name.toLowerCase().includes(productSearch.toLowerCase())) || 
+      (p.categoryLabel && p.categoryLabel.includes(productSearch)) ||
+      (p.category && p.category.includes(productSearch));
     const matchesCat = productCategoryFilter === 'all' || p.category === productCategoryFilter;
     const matchesStock = productStockFilter === 'all' || 
       (productStockFilter === 'in_stock' ? (p.stock ?? 0) > 0 : (p.stock ?? 0) <= 0);
@@ -582,12 +700,20 @@ export const AdminModal: React.FC<AdminModalProps> = ({
 
           <div className="flex items-center gap-2">
             {isAuthenticated && (
-              <button
-                onClick={() => setIsAuthenticated(false)}
-                className="text-xs text-red-600 hover:bg-red-50 px-3 py-1.5 rounded-xl border border-red-200 transition-colors font-bold cursor-pointer"
-              >
-                خروج از پنل
-              </button>
+              <div className="flex items-center gap-2">
+                <div className="hidden sm:flex flex-col text-left text-[11px] leading-tight">
+                  <span className="font-bold text-gray-800">{currentUser?.email || 'مدیر سیستم'}</span>
+                  <span className="text-emerald-700 font-semibold text-[10px]">
+                    {authMethod === 'firebase_google' ? '✓ احراز هویت Firebase' : 'دسترسی با رمز عبور'}
+                  </span>
+                </div>
+                <button
+                  onClick={handleLogout}
+                  className="text-xs text-red-600 hover:bg-red-50 px-3 py-1.5 rounded-xl border border-red-200 transition-colors font-bold cursor-pointer"
+                >
+                  خروج
+                </button>
+              </div>
             )}
             <button
               onClick={onClose}
@@ -600,7 +726,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
 
         {/* LOGIN SCREEN */}
         {!isAuthenticated ? (
-          <div className="p-8 sm:p-14 text-center max-w-md mx-auto my-auto space-y-5">
+          <div className="p-6 sm:p-10 text-center max-w-md mx-auto my-auto space-y-5 animate-in fade-in">
             <div className="w-16 h-16 rounded-3xl bg-[#FAF3E3] border border-[#E3CE9B] flex items-center justify-center text-[#231709] mx-auto shadow-sm">
               <Lock className="w-8 h-8 text-[#231709]" />
             </div>
@@ -608,15 +734,51 @@ export const AdminModal: React.FC<AdminModalProps> = ({
             <div>
               <h4 className="text-lg font-black text-[#231709]">ورود امن به پنل مدیریت</h4>
               <p className="text-xs text-[#6A5A4A] mt-1">
-                جهت دسترسی به داشبورد و سفارشات، رمز عبور مدیریت را وارد نمایید.
+                دسترسی به اطلاعات سفارشات، تغییر قیمت‌ها و کاتالوگ فروشگاه
               </p>
             </div>
 
-            <form onSubmit={handleLogin} className="space-y-4">
+            {/* Google Authentication (Primary / Cryptographic) */}
+            <div className="space-y-3">
+              <button
+                type="button"
+                onClick={handleGoogleLogin}
+                disabled={isLoggingInGoogle}
+                className="w-full py-3.5 px-4 rounded-2xl bg-white hover:bg-gray-50 text-gray-800 font-bold text-xs sm:text-sm shadow-sm border border-gray-300 transition-all flex items-center justify-center gap-2.5 cursor-pointer disabled:opacity-50"
+              >
+                {/* Official Google 'G' Icon */}
+                <svg className="w-4 h-4 flex-shrink-0" viewBox="0 0 24 24">
+                  <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
+                  <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
+                  <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" />
+                  <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" />
+                </svg>
+                <span>{isLoggingInGoogle ? 'در حال اتصال به Google...' : 'ورود با حساب گوگل مدیر'}</span>
+              </button>
+
+              <div className="text-[11px] text-gray-500 font-medium">
+                حساب مجاز مدیر: <span className="font-mono font-bold text-gray-700">matinjahanbani2024@gmail.com</span>
+              </div>
+
+              {googleLoginError && (
+                <div className="text-xs text-red-600 font-bold bg-red-50 p-2.5 rounded-xl border border-red-200">
+                  {googleLoginError}
+                </div>
+              )}
+            </div>
+
+            <div className="relative flex items-center justify-center">
+              <div className="border-t border-gray-200 w-full" />
+              <span className="bg-[#FAF8F3] px-3 text-[11px] text-gray-400 font-bold whitespace-nowrap">
+                یا ورود با رمز عبور
+              </span>
+            </div>
+
+            {/* PIN Fallback Form */}
+            <form onSubmit={handlePinLogin} className="space-y-3">
               <input
                 type="password"
                 dir="ltr"
-                autoFocus
                 value={passwordInput}
                 onChange={(e) => setPasswordInput(e.target.value)}
                 placeholder="رمز عبور مدیریت..."
@@ -631,12 +793,19 @@ export const AdminModal: React.FC<AdminModalProps> = ({
 
               <button
                 type="submit"
-                className="w-full py-3.5 rounded-2xl bg-[#231709] hover:bg-[#150D05] text-white font-black text-sm shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer"
+                className="w-full py-3 rounded-2xl bg-[#231709] hover:bg-[#150D05] text-white font-black text-xs sm:text-sm shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer"
               >
                 <Unlock className="w-4 h-4 text-amber-300" />
-                <span>ورود به بخش مدیریت</span>
+                <span>ورود با رمز</span>
               </button>
             </form>
+
+            <div className="p-3 bg-amber-50/70 border border-amber-200/80 rounded-2xl text-[11px] text-amber-900 text-right leading-relaxed flex items-start gap-2">
+              <ShieldCheck className="w-4 h-4 text-emerald-700 flex-shrink-0 mt-0.5" />
+              <span>
+                <strong>امنیت دیتابیس:</strong> تغییرات موجودی، سفارش‌ها و اطلاعات مالی توسط قوانین امنیتی Firestore و سرور مرکزی محافظت می‌شوند.
+              </span>
+            </div>
           </div>
         ) : (
           /* AUTHENTICATED ADMIN PANEL */
@@ -1318,7 +1487,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                             name: '',
                             category: firstCat ? firstCat.id : 'organic',
                             categoryLabel: firstCat ? firstCat.name : 'محصولات ارگانیک و طبیعی',
-                            price: 0,
+                            price: 150000,
                             weight: 'بسته استاندارد',
                             stock: 25,
                             isOrganic: true,
@@ -1500,10 +1669,11 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                             <label className="block text-xs font-bold text-gray-700 mb-1">قیمت فروش (تومان) *</label>
                             <input
                               type="number"
-                              value={editingProduct.price || ''}
-                              onChange={(e) => setEditingProduct({ ...editingProduct, price: Number(e.target.value) })}
+                              value={editingProduct.price !== undefined && editingProduct.price !== null ? editingProduct.price : ''}
+                              onChange={(e) => setEditingProduct({ ...editingProduct, price: e.target.value === '' ? ('' as any) : Number(e.target.value) })}
                               className="w-full bg-[#FAF8F3] border rounded-xl px-3 py-2 text-xs font-bold"
                               required
+                              placeholder="مثلاً: ۱۵۰،۰۰۰"
                             />
                           </div>
 
@@ -1681,6 +1851,13 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                           </button>
                         </div>
                       </form>
+                    </div>
+                  )}
+
+                  {productSuccessMessage && (
+                    <div className="bg-emerald-50 border border-emerald-300 text-emerald-800 p-3 rounded-2xl text-xs font-bold flex items-center gap-2 animate-in fade-in shadow-xs">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-600 flex-shrink-0" />
+                      <span>{productSuccessMessage}</span>
                     </div>
                   )}
 

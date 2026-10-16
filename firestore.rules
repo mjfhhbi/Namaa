@@ -2,37 +2,91 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // Helper functions
-    function isValidId(id) {
-      return id is string && id.size() > 0 && id.size() <= 128;
-    }
-
-    // Products collection: public read for all devices/phones, allow create/update/delete
-    match /products/{productId} {
-      allow read: if true;
-      allow write: if true;
-    }
-
-    // Orders collection: public create for checkout, read for tracking and admin dashboard
-    match /orders/{orderId} {
-      allow read: if true;
-      allow write: if true;
-    }
-
-    // Store settings: public read for bank details, WhatsApp, and CMS text; allow update
-    match /settings/{settingId} {
-      allow read: if true;
-      allow write: if true;
-    }
-
-    // Connection testing
-    match /test/{testId} {
-      allow read, write: if true;
-    }
-
-    // Default deny for all other paths
+    // 0. Global default deny
     match /{document=**} {
       allow read, write: if false;
+    }
+
+    // Helper: User is signed in to Firebase Auth
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    // Helper: Verified Store Owner (matinjahanbani2024@gmail.com with verified email)
+    function isVerifiedOwner() {
+      return isSignedIn() &&
+        request.auth.token.email == 'matinjahanbani2024@gmail.com' &&
+        request.auth.token.email_verified == true;
+    }
+
+    // Helper: Store Administrator (Verified owner or registered admin doc)
+    function isAdmin() {
+      return isVerifiedOwner() || (
+        isSignedIn() &&
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/admins/$(request.auth.uid)).data.role == 'admin'
+      );
+    }
+
+    // Helper: Validate order schema during public customer checkout
+    function isValidOrderCreate(data, orderId) {
+      return orderId is string && orderId.size() > 0 && orderId.size() <= 64 &&
+        data.id == orderId &&
+        data.customerName is string && data.customerName.size() >= 2 && data.customerName.size() <= 100 &&
+        data.customerPhone is string && data.customerPhone.size() >= 10 && data.customerPhone.size() <= 20 &&
+        data.address is string && data.address.size() >= 5 && data.address.size() <= 500 &&
+        data.totalAmount is number && data.totalAmount >= 0 &&
+        data.items is list && data.items.size() > 0 && data.items.size() <= 100 &&
+        // Security gate: customer cannot mark order as approved, shipped, or delivered at creation
+        (data.status == 'pending_receipt' || data.status == 'paid_pending_approval');
+    }
+
+    // 1. Admins registry
+    // Strictly restricted to verified store owner!
+    // Regular or anonymous users cannot create, read, update, or delete admin documents.
+    match /admins/{adminId} {
+      allow read, write: if isVerifiedOwner();
+    }
+
+    // 2. Products catalog
+    // Read: public (anyone can view store products)
+    // Create & Delete: strictly restricted to authenticated store admin
+    // Update: restricted to admin, OR strictly bounded atomic stock decrement during checkout
+    match /products/{productId} {
+      allow read: if true;
+      allow create, delete: if isAdmin();
+      allow update: if isAdmin() || (
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['stock', 'updatedAt']) &&
+        request.resource.data.stock is number &&
+        request.resource.data.stock >= 0 &&
+        request.resource.data.stock < resource.data.stock
+      );
+    }
+
+    // 3. Customer orders
+    // List: strictly restricted to admin (prevents customer directory enumeration and mass scraping)
+    // Get: restricted to admin or signed-in customer owning the order
+    // Create: allowed during customer checkout with strict schema and initial status validation
+    // Update & Delete: strictly restricted to admin
+    match /orders/{orderId} {
+      allow list: if isAdmin();
+      allow get: if isAdmin() || (isSignedIn() && resource.data.userId == request.auth.uid);
+      allow create: if isValidOrderCreate(request.resource.data, orderId);
+      allow update, delete: if isAdmin();
+    }
+
+    // 4. Store settings
+    // Read: public (store info, contact numbers, working hours, shipping costs)
+    // Write: strictly restricted to admin
+    match /settings/{settingId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // 5. Connection test collection (Read-only single doc, no writes)
+    match /test/{testId} {
+      allow get: if true;
+      allow list, write: if false;
     }
   }
 }

@@ -3,7 +3,6 @@ import { Product, StoreSettings } from '../types';
 export const DEFAULT_SETTINGS: StoreSettings = {
   storeName: "ناما | NAMA",
   slogan: "از نام و جان برای طعمی ماندگار",
-  adminPassword: "1383", // رمز عبور مدیریت
   cardNumber: "6037-9918-4521-8763",
   cardHolder: "متین جهانبانی (ناما فود)",
   bankName: "بانک ملی ایران",

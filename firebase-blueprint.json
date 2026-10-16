@@ -150,10 +150,6 @@
           "type": "string",
           "description": "Brand slogan"
         },
-        "adminPassword": {
-          "type": "string",
-          "description": "Admin access passcode (default 1383)"
-        },
         "cardNumber": {
           "type": "string",
           "description": "16-digit bank card number for payments"
@@ -191,7 +187,7 @@
           "description": "Top promotional banner text"
         }
       },
-      "required": ["storeName", "cardNumber", "cardHolder", "adminPassword"]
+      "required": ["storeName", "cardNumber", "cardHolder"]
     }
   },
   "firestore": {

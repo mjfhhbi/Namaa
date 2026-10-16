@@ -106,25 +106,21 @@ export function saveLocalProducts(products: Product[]): void {
   }
 }
 
+export function getAdminAuthHeaders(): Record<string, string> {
+  const token = typeof window !== 'undefined' ? sessionStorage.getItem('nama_admin_token') : null;
+  return {
+    'Content-Type': 'application/json',
+    ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+  };
+}
+
 export function getLocalOrders(): Order[] {
-  try {
-    const raw = localStorage.getItem(LS_ORDERS_KEY);
-    if (raw !== null) {
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) return parsed;
-    }
-  } catch (e) {
-    console.error('Failed to read orders from localStorage', e);
-  }
+  // Customer privacy: orders are strictly accessed in real-time by authenticated admin and never persisted in browser localStorage
   return [];
 }
 
-export function saveLocalOrders(orders: Order[]): void {
-  try {
-    localStorage.setItem(LS_ORDERS_KEY, JSON.stringify(orders));
-  } catch (e) {
-    console.error('Failed to save orders to localStorage', e);
-  }
+export function saveLocalOrders(_orders: Order[]): void {
+  // Never persist full customer order records in public browser localStorage
 }
 
 // -------------------------------------------------------------
@@ -156,11 +152,19 @@ export async function fetchStoreSettings(): Promise<StoreSettings> {
 export async function updateStoreSettings(newSettings: StoreSettings): Promise<void> {
   saveLocalSettings(newSettings);
   const path = 'settings';
+  // 1. Server-side proxy save with admin auth
+  fetch('/api/admin/settings/update', {
+    method: 'POST',
+    headers: getAdminAuthHeaders(),
+    body: JSON.stringify(newSettings),
+  }).catch(() => {});
+
+  // 2. Direct Firestore save
   try {
     const docRef = doc(db, path, 'main');
     await setDoc(docRef, newSettings);
   } catch (error) {
-    handleFirestoreError(error, OperationType.WRITE, path);
+    console.warn('Direct Firestore settings update notice:', error);
   }
 }
 
@@ -192,26 +196,53 @@ export async function fetchProducts(): Promise<Product[]> {
   }
 }
 
+export function sanitizeForFirestore<T extends Record<string, any>>(obj: T): Record<string, any> {
+  const result: Record<string, any> = {};
+  for (const [key, value] of Object.entries(obj)) {
+    if (value !== undefined) {
+      if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
+        result[key] = sanitizeForFirestore(value);
+      } else {
+        result[key] = value;
+      }
+    }
+  }
+  return result;
+}
 
 export async function saveProduct(product: Product): Promise<void> {
+  // Clean product of any undefined fields
+  const cleanProduct = sanitizeForFirestore(product) as Product;
+
   // Update local immediately so UI reflects product instantly
   const current = getLocalProducts();
-  const index = current.findIndex(p => p.id === product.id);
+  const index = current.findIndex(p => p.id === cleanProduct.id);
   let updated: Product[];
   if (index >= 0) {
     updated = [...current];
-    updated[index] = product;
+    updated[index] = cleanProduct;
   } else {
-    updated = [product, ...current];
+    updated = [cleanProduct, ...current];
   }
   saveLocalProducts(updated);
 
-  // Update firestore
+  // 1. Server-side authoritative write with admin auth
+  try {
+    await fetch('/api/admin/products/save', {
+      method: 'POST',
+      headers: getAdminAuthHeaders(),
+      body: JSON.stringify(cleanProduct),
+    });
+  } catch (err) {
+    console.warn('Server product save notice:', err);
+  }
+
+  // 2. Direct client-side Firestore write for real-time propagation
   const path = 'products';
   try {
-    await setDoc(doc(db, path, product.id), product);
+    await setDoc(doc(db, path, cleanProduct.id), cleanProduct);
   } catch (error) {
-    console.warn('Firestore write warning:', error);
+    console.warn('Firestore direct write notice:', error);
   }
 }
 
@@ -220,7 +251,18 @@ export async function deleteProduct(productId: string): Promise<void> {
   const current = getLocalProducts();
   saveLocalProducts(current.filter(p => p.id !== productId));
 
-  // Update firestore
+  // 1. Server-side delete with admin auth
+  try {
+    await fetch('/api/admin/products/delete', {
+      method: 'POST',
+      headers: getAdminAuthHeaders(),
+      body: JSON.stringify({ productId }),
+    });
+  } catch (err) {
+    console.warn('Server product delete notice:', err);
+  }
+
+  // 2. Direct Firestore delete
   const path = 'products';
   try {
     await deleteDoc(doc(db, path, productId));
@@ -234,6 +276,11 @@ export async function clearAllProducts(): Promise<void> {
   const current = getLocalProducts();
   saveLocalProducts([]);
   localStorage.setItem(LS_CATALOG_INIT_FLAG, 'true');
+
+  fetch('/api/admin/products/clear', {
+    method: 'POST',
+    headers: getAdminAuthHeaders()
+  }).catch(() => {});
 
   const path = 'products';
   try {
@@ -260,7 +307,7 @@ export async function resetSampleProducts(): Promise<Product[]> {
   return DEFAULT_PRODUCTS;
 }
 
-// Fetch Orders
+// Fetch Orders (strictly restricted to Admin)
 export async function fetchOrders(): Promise<Order[]> {
   const path = 'orders';
   try {
@@ -271,73 +318,153 @@ export async function fetchOrders(): Promise<Order[]> {
         list.push(docSnap.data() as Order);
       });
       list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-      saveLocalOrders(list);
       return list;
-    } else {
-      // Empty order list in Firestore
-      const cached = getLocalOrders();
-      return cached;
     }
-  } catch (error) {
-    console.warn('Firestore orders fetch notice, using cached orders:', error);
-    return getLocalOrders();
+    return [];
+  } catch (error: any) {
+    // If not signed in as admin, Firestore rules correctly deny listing orders
+    if (error?.message?.includes('Missing or insufficient permissions') || error?.code === 'permission-denied') {
+      return [];
+    }
+    console.warn('Orders fetch notice:', error);
+    return [];
   }
 }
 
-// Delete an order permanently
+// Delete an order permanently (Admin only)
 export async function deleteOrder(orderId: string): Promise<void> {
-  const current = getLocalOrders();
-  saveLocalOrders(current.filter(o => o.id !== orderId));
+  // Server-side delete with admin auth
+  fetch('/api/admin/orders/delete', {
+    method: 'POST',
+    headers: getAdminAuthHeaders(),
+    body: JSON.stringify({ orderId }),
+  }).catch(() => {});
 
   const path = 'orders';
   try {
     await deleteDoc(doc(db, path, orderId));
   } catch (error) {
-    handleFirestoreError(error, OperationType.DELETE, `${path}/${orderId}`);
+    console.warn('Firestore delete order notice:', error);
   }
 }
 
-// Clear all orders (for starting clean production store)
+// Clear all orders (Admin only)
 export async function clearAllOrders(): Promise<void> {
-  const current = getLocalOrders();
-  saveLocalOrders([]);
+  fetch('/api/admin/orders/clear', {
+    method: 'POST',
+    headers: getAdminAuthHeaders()
+  }).catch(() => {});
 
   const path = 'orders';
   try {
-    for (const ord of current) {
-      await deleteDoc(doc(db, path, ord.id)).catch(() => {});
+    const snap = await getDocs(collection(db, path));
+    for (const d of snap.docs) {
+      await deleteDoc(doc(db, path, d.id)).catch(() => {});
     }
   } catch (error) {
     console.warn('Notice while clearing orders:', error);
   }
 }
 
-// Create new customer order & send notification
-export async function createOrder(order: Order, settings: StoreSettings): Promise<void> {
-  // Update local
-  const current = getLocalOrders();
-  saveLocalOrders([order, ...current]);
+// Save placed order locally for customer's own device history (sanitized, zero full address/card PII stored)
+export function saveMyPlacedOrder(order: Order): void {
+  try {
+    const key = 'nama_my_recent_orders_v1';
+    const raw = localStorage.getItem(key);
+    const list: any[] = raw ? JSON.parse(raw) : [];
+    // Sanitize customer PII: omit full street address, postal code, and payment card details from localStorage
+    const safeOrder: Partial<Order> = {
+      id: order.id,
+      customerName: order.customerName,
+      customerPhone: order.customerPhone ? `${order.customerPhone.slice(0, 4)}***${order.customerPhone.slice(-4)}` : '',
+      province: order.province,
+      city: order.city,
+      items: order.items,
+      subtotal: order.subtotal,
+      shippingCost: order.shippingCost,
+      totalAmount: order.totalAmount,
+      status: order.status,
+      paymentMethod: order.paymentMethod,
+      trackingCode: order.trackingCode,
+      createdAt: order.createdAt,
+      updatedAt: order.updatedAt,
+    };
+    const filtered = list.filter(o => o.id !== order.id);
+    localStorage.setItem(key, JSON.stringify([safeOrder, ...filtered].slice(0, 10)));
+  } catch (e) {
+    console.warn('Could not save order to local storage', e);
+  }
+}
 
-  // Firestore write
+export function getMyPlacedOrders(): Order[] {
+  try {
+    const key = 'nama_my_recent_orders_v1';
+    const raw = localStorage.getItem(key);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+// Create new customer order with server-authoritative validation & stock decrement
+export async function createOrder(order: Order, settings: StoreSettings): Promise<Order> {
+  // 1. First attempt trusted server-side creation & price verification
+  try {
+    const res = await fetch('/api/orders/create', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(order),
+    });
+
+    if (res.ok) {
+      const data = await res.json();
+      if (data?.success && data?.order) {
+        saveMyPlacedOrder(data.order);
+        return data.order as Order;
+      }
+    } else {
+      const errorData = await res.json().catch(() => null);
+      if (errorData?.error) {
+        throw new Error(errorData.error);
+      }
+    }
+  } catch (serverErr: any) {
+    // If the server explicitly rejected the order (e.g. out of stock), throw to notify customer
+    if (serverErr.message && !serverErr.message.includes('Failed to fetch') && !serverErr.message.includes('NetworkError')) {
+      throw serverErr;
+    }
+    console.warn('Backend /api/orders/create unavailable, falling back to direct Firestore write:', serverErr);
+  }
+
+  // 2. Direct Firestore fallback (authorized by isValidOrderCreate rule)
   const path = 'orders';
   try {
     await setDoc(doc(db, path, order.id), order);
+    saveMyPlacedOrder(order);
   } catch (error) {
-    console.warn('Firestore order write notice:', error);
+    console.warn('Direct Firestore order write notice:', error);
+    saveMyPlacedOrder(order);
   }
 
-  // Send 100% free ntfy push notification to store owner!
+  // Send privacy-preserving instant ntfy push notification to store owner!
+  // (Customer phone and full street address are never sent to third-party public notification servers)
   try {
+    const maskedName = order.customerName.length > 3
+      ? `${order.customerName.slice(0, 3)}***`
+      : order.customerName;
+
     await sendNtfyNotification({
       topic: settings.ntfyTopic || 'nama_store_orders_1383',
       title: `🌿 سفارش جدید در ناما (${order.id})`,
-      message: `مشتری: ${order.customerName}\nمبلغ کل: ${order.totalAmount.toLocaleString('fa-IR')} تومان\nشماره تماس: ${order.customerPhone}\nشهر: ${order.city}`,
+      message: `سفارش جدید ${order.id} به مبلغ ${order.totalAmount.toLocaleString('fa-IR')} تومان ثبت شد.\nنام: ${maskedName}\nشهر: ${order.city}\n(جزئیات کامل، شماره تماس و آدرس فقط در پنل امن مدیریت ثبت گردید)`,
       tags: ['shopping_cart', 'package', 'dollar'],
       priority: 4,
     });
   } catch (e) {
     console.error('ntfy notification error:', e);
   }
+
+  return order;
 }
 
 // Update order status or postal tracking
@@ -346,18 +473,14 @@ export async function updateOrderStatus(
   status: OrderStatus, 
   extras?: { trackingCode?: string; receiptImage?: string; notes?: string; cardLast4?: string; paymentReference?: string }
 ): Promise<void> {
-  const current = getLocalOrders();
-  const orderIdx = current.findIndex(o => o.id === orderId);
-  if (orderIdx >= 0) {
-    current[orderIdx] = {
-      ...current[orderIdx],
-      status,
-      ...extras,
-      updatedAt: new Date().toISOString()
-    };
-    saveLocalOrders([...current]);
-  }
+  // 1. Server-side update with admin auth
+  fetch('/api/admin/orders/update', {
+    method: 'POST',
+    headers: getAdminAuthHeaders(),
+    body: JSON.stringify({ orderId, status, trackingCode: extras?.trackingCode }),
+  }).catch(() => {});
 
+  // 2. Direct Firestore update
   const path = 'orders';
   try {
     await updateDoc(doc(db, path, orderId), {
@@ -366,32 +489,48 @@ export async function updateOrderStatus(
       updatedAt: new Date().toISOString()
     });
   } catch (error) {
-    handleFirestoreError(error, OperationType.UPDATE, `${path}/${orderId}`);
+    console.warn('Firestore update order notice:', error);
   }
 }
 
-// Lookup order by Tracking ID or Phone Number
-export async function searchOrder(query: string): Promise<Order | null> {
-  const clean = query.trim().toUpperCase();
-  const orders = getLocalOrders();
-  
-  const found = orders.find(o => 
-    o.id.toUpperCase() === clean || 
-    o.customerPhone.replace(/[\s-]/g, '') === clean.replace(/[\s-]/g, '')
-  );
+// Lookup order securely by Order ID and Phone Number
+export async function searchOrder(orderIdQuery: string, phoneQuery?: string): Promise<Order | null> {
+  const cleanId = orderIdQuery.trim().toUpperCase();
+  const cleanPhone = (phoneQuery || '').trim();
 
-  if (found) return found;
-
-  // Try Firestore direct get if query matches ID format
-  const path = 'orders';
+  // 1. Try secure server-side tracking endpoint (checks phone matching to prevent data leak)
   try {
-    const docSnap = await getDoc(doc(db, path, clean));
-    if (docSnap.exists()) {
-      return docSnap.data() as Order;
+    const res = await fetch('/api/orders/track', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ orderId: cleanId, phone: cleanPhone })
+    });
+
+    if (res.ok) {
+      const data = await res.json();
+      if (data?.success && data?.order) {
+        return data.order as Order;
+      }
+    } else {
+      const errRes = await res.json().catch(() => null);
+      if (errRes?.error) {
+        throw new Error(errRes.error);
+      }
     }
-  } catch (error) {
-    console.warn('Order search query notice:', error);
+  } catch (err: any) {
+    if (err.message && (err.message.includes('مطابقت ندارد') || err.message.includes('یافت نشد'))) {
+      throw err;
+    }
+    console.warn('API tracking endpoint notice:', err);
   }
+
+  // 2. Check local orders placed on this device
+  const myOrders = getMyPlacedOrders();
+  const localMatch = myOrders.find(o => 
+    o.id.toUpperCase() === cleanId || 
+    (cleanPhone && o.customerPhone.replace(/[\s-]/g, '').endsWith(cleanPhone.replace(/[\s-]/g, '').slice(-7)))
+  );
+  if (localMatch) return localMatch;
 
   return null;
 }
