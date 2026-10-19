@@ -102,11 +102,11 @@ export interface DiscountCode {
 export interface StoreSettings {
   storeName: string;
   slogan: string;
-  // اطلاعات کارت بانکی
-  cardNumber: string;
-  cardHolder: string;
-  bankName: string;
-  shabaNumber: string;
+  // اطلاعات کارت بانکی (فقط در تنظیمات خصوصی مدیریت)
+  cardNumber?: string;
+  cardHolder?: string;
+  bankName?: string;
+  shabaNumber?: string;
   // هزینه‌ها
   shippingCost: number;
   freeShippingThreshold?: number;
@@ -116,8 +116,8 @@ export interface StoreSettings {
   supportInstagram: string;
   supportTelegram?: string;
   supportAddress?: string;
-  // اعلان‌ها
-  ntfyTopic: string;
+  // اعلان‌ها و تنظیمات خصوصی
+  ntfyTopic?: string;
   announcement: string;
   isStoreOpen: boolean;
   storeClosedMessage?: string;

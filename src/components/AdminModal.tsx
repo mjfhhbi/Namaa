@@ -49,7 +49,7 @@ import {
   Sliders,
   ShieldCheck
 } from 'lucide-react';
-import { sendNtfyNotification } from '../services/storeService';
+import { sendNtfyNotification, fetchAdminSettings } from '../services/storeService';
 import { DEFAULT_SETTINGS } from '../data/defaultProducts';
 import { PRESET_IMAGE_OPTIONS } from '../data/productImages';
 import { compressImage } from '../utils/imageCompressor';
@@ -144,6 +144,11 @@ export const AdminModal: React.FC<AdminModalProps> = ({
             role: 'admin',
             lastLogin: new Date().toISOString()
           }, { merge: true });
+          const fullSettings = await fetchAdminSettings();
+          if (fullSettings) {
+            setFormSettings(fullSettings);
+            onUpdateSettings(fullSettings);
+          }
         } catch (e) {
           console.warn('Admin registry notice:', e);
         }
@@ -157,6 +162,13 @@ export const AdminModal: React.FC<AdminModalProps> = ({
   };
 
   const handleLogout = async () => {
+    const token = sessionStorage.getItem('nama_admin_token');
+    if (token) {
+      fetch('/api/admin/logout', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` }
+      }).catch(() => {});
+    }
     try {
       await signOut(auth);
     } catch {}
@@ -183,6 +195,13 @@ export const AdminModal: React.FC<AdminModalProps> = ({
         setAuthMethod('pin');
         setLoginError(false);
         setFormSettings({ ...settings });
+        try {
+          const fullSettings = await fetchAdminSettings();
+          if (fullSettings) {
+            setFormSettings(fullSettings);
+            onUpdateSettings(fullSettings);
+          }
+        } catch {}
       } else {
         setLoginError(true);
       }
@@ -2705,9 +2724,11 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                               <button
                                 type="button"
                                 onClick={() => {
-                                  navigator.clipboard.writeText(formSettings.cardNumber.replace(/\s|-/g, ''));
-                                  setCopiedCardStatus(true);
-                                  setTimeout(() => setCopiedCardStatus(false), 2000);
+                                  if (formSettings.cardNumber) {
+                                    navigator.clipboard.writeText(formSettings.cardNumber.replace(/\s|-/g, ''));
+                                    setCopiedCardStatus(true);
+                                    setTimeout(() => setCopiedCardStatus(false), 2000);
+                                  }
                                 }}
                                 className="text-[11px] text-[#A47922] font-bold flex items-center gap-1 cursor-pointer"
                               >
@@ -2718,7 +2739,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                             <input
                               type="text"
                               dir="ltr"
-                              value={formSettings.cardNumber}
+                              value={formSettings.cardNumber || ''}
                               onChange={(e) => setFormSettings({ ...formSettings, cardNumber: e.target.value })}
                               className="w-full bg-[#FAF8F3] border rounded-xl px-3 py-2 text-xs font-mono text-center font-bold"
                               required
@@ -2729,7 +2750,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                             <label className="block text-xs font-bold text-gray-700 mb-1">نام و نام خانوادگی صاحب حساب *</label>
                             <input
                               type="text"
-                              value={formSettings.cardHolder}
+                              value={formSettings.cardHolder || ''}
                               onChange={(e) => setFormSettings({ ...formSettings, cardHolder: e.target.value })}
                               className="w-full bg-[#FAF8F3] border rounded-xl px-3 py-2 text-xs font-bold"
                               required
@@ -2742,7 +2763,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                             <label className="block text-xs font-bold text-gray-700 mb-1">نام بانک عامل</label>
                             <input
                               type="text"
-                              value={formSettings.bankName}
+                              value={formSettings.bankName || ''}
                               onChange={(e) => setFormSettings({ ...formSettings, bankName: e.target.value })}
                               className="w-full bg-[#FAF8F3] border rounded-xl px-3 py-2 text-xs"
                             />
@@ -2753,7 +2774,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                             <input
                               type="text"
                               dir="ltr"
-                              value={formSettings.shabaNumber}
+                              value={formSettings.shabaNumber || ''}
                               onChange={(e) => setFormSettings({ ...formSettings, shabaNumber: e.target.value })}
                               className="w-full bg-[#FAF8F3] border rounded-xl px-3 py-2 text-xs font-mono text-center"
                             />

@@ -137,57 +137,50 @@
       },
       "required": ["id", "customerName", "customerPhone", "address", "totalAmount", "status", "createdAt"]
     },
-    "StoreSettings": {
-      "title": "StoreSettings",
-      "description": "Store configuration, bank card details, admin password and ntfy settings",
+    "PublicSettings": {
+      "title": "PublicSettings",
+      "description": "Public store configuration, branding, working hours, CMS texts and shipping rates",
       "type": "object",
       "properties": {
-        "storeName": {
-          "type": "string",
-          "description": "Store display title"
-        },
-        "slogan": {
-          "type": "string",
-          "description": "Brand slogan"
-        },
-        "cardNumber": {
-          "type": "string",
-          "description": "16-digit bank card number for payments"
-        },
-        "shabaNumber": {
-          "type": "string",
-          "description": "IBAN / Sheba number"
-        },
-        "cardHolder": {
-          "type": "string",
-          "description": "Account holder official full name"
-        },
-        "bankName": {
-          "type": "string",
-          "description": "Issuing bank name (e.g. ملی، ملت، سامان)"
-        },
-        "shippingCost": {
-          "type": "number",
-          "description": "Default shipping cost in Tomans"
-        },
-        "freeShippingThreshold": {
-          "type": "number",
-          "description": "Order minimum for free express shipping"
-        },
-        "supportPhone": {
-          "type": "string",
-          "description": "Customer care direct phone number"
-        },
-        "ntfyTopic": {
-          "type": "string",
-          "description": "Topic name for instant ntfy push alerts"
-        },
-        "announcement": {
-          "type": "string",
-          "description": "Top promotional banner text"
-        }
+        "storeName": { "type": "string" },
+        "slogan": { "type": "string" },
+        "shippingCost": { "type": "number" },
+        "freeShippingThreshold": { "type": "number" },
+        "supportPhone": { "type": "string" },
+        "supportWhatsApp": { "type": "string" },
+        "supportInstagram": { "type": "string" },
+        "supportTelegram": { "type": "string" },
+        "supportAddress": { "type": "string" },
+        "announcement": { "type": "string" },
+        "isStoreOpen": { "type": "boolean" },
+        "aboutText": { "type": "string" },
+        "heroBadge": { "type": "string" },
+        "heroTitle": { "type": "string" },
+        "heroSubtitle": { "type": "string" },
+        "heroButtonText": { "type": "string" },
+        "promoBadge": { "type": "string" },
+        "promoTitle": { "type": "string" },
+        "promoSubtitle": { "type": "string" },
+        "qualityBadge1": { "type": "string" },
+        "qualityBadge2": { "type": "string" },
+        "qualityBadge3": { "type": "string" },
+        "qualityBadge4": { "type": "string" }
       },
-      "required": ["storeName", "cardNumber", "cardHolder"]
+      "required": ["storeName", "shippingCost"]
+    },
+    "PrivateSettings": {
+      "title": "PrivateSettings",
+      "description": "Sensitive administrative settings, bank card details, sheba, ntfy topic, and discount codes",
+      "type": "object",
+      "properties": {
+        "cardNumber": { "type": "string" },
+        "cardHolder": { "type": "string" },
+        "bankName": { "type": "string" },
+        "shabaNumber": { "type": "string" },
+        "ntfyTopic": { "type": "string" },
+        "zarinpalMerchantId": { "type": "string" }
+      },
+      "required": ["cardNumber", "cardHolder"]
     }
   },
   "firestore": {
@@ -199,9 +192,13 @@
       "schema": "Order",
       "description": "Collection of customer orders with verification and shipment records"
     },
-    "/settings/{settingId}": {
-      "schema": "StoreSettings",
-      "description": "Global store settings and administrative configuration"
+    "/settings/public": {
+      "schema": "PublicSettings",
+      "description": "Public store settings readable by all store visitors"
+    },
+    "/settings/private": {
+      "schema": "PrivateSettings",
+      "description": "Confidential store banking and notification configuration restricted to admins"
     }
   }
 }

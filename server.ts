@@ -17,8 +17,20 @@ import { initializeApp as initAdminApp, getApps as getAdminApps, cert } from 'fi
 import { getAuth as getAdminAuth } from 'firebase-admin/auth';
 import { getFirestore as getAdminFirestore } from 'firebase-admin/firestore';
 import firebaseConfig from './firebase-applet-config.json';
+import { 
+  initAdminSecurity, 
+  verifyAdminPin, 
+  validateSessionToken, 
+  changeAdminPin, 
+  isPinConfigured,
+  revokeSession
+} from './src/server/adminSecurity';
+import { processOrderCreation } from './src/server/orderManager';
 
 const app = express();
+// Enable secure reverse proxy support (Cloud Run / Nginx / Docker)
+app.set('trust proxy', 1);
+
 const PORT = Number(process.env.PORT) || 3000;
 const HOST = '0.0.0.0';
 
@@ -53,25 +65,47 @@ app.get('/healthz', (_req, res) => {
   res.status(200).send('OK');
 });
 
-// Helper: Normalize Persian/Arabic digits to English
+// Helper: Normalize Persian/Arabic digits to English standard
 function toEnglishDigits(str: string): string {
   if (!str) return '';
   const farsiDigits = ['۰', '۱', '۲', '۳', '۴', '۵', '۶', '۷', '۸', '۹'];
   const arabicDigits = ['٠', '١', '٢', '٣', '٤', '٥', '٦', '٧', '٨', '٩'];
-  let res = str;
+  let res = String(str);
   for (let i = 0; i < 10; i++) {
     res = res.replaceAll(farsiDigits[i], String(i)).replaceAll(arabicDigits[i], String(i));
   }
   return res;
 }
 
-// Client IP resolver helper
-function getClientIp(req: express.Request): string {
-  const forwarded = req.headers['x-forwarded-for'];
-  if (typeof forwarded === 'string') {
-    return forwarded.split(',')[0].trim();
+// Comprehensive Iranian phone normalizer
+// Standardizes +98, 0098, 98, Persian/Arabic digits, dashes, and spaces to 09XXXXXXXXX
+function normalizeIranianPhone(raw: string): string {
+  if (!raw) return '';
+  const english = toEnglishDigits(raw);
+  let digits = english.replace(/\D/g, '');
+
+  if (digits.startsWith('00989')) {
+    digits = '0' + digits.slice(4);
+  } else if (digits.startsWith('989')) {
+    digits = '0' + digits.slice(2);
+  } else if (digits.startsWith('9') && digits.length === 10) {
+    digits = '0' + digits;
   }
-  return req.socket.remoteAddress || 'unknown';
+
+  return digits;
+}
+
+function isValidIranianMobile(phone: string): boolean {
+  const norm = normalizeIranianPhone(phone);
+  return /^09\d{9}$/.test(norm);
+}
+
+// Client IP resolver helper using Express validated req.ip with trust proxy
+function getClientIp(req: express.Request): string {
+  if (req.ip) {
+    return req.ip.replace(/^::ffff:/, '');
+  }
+  return req.socket.remoteAddress?.replace(/^::ffff:/, '') || '127.0.0.1';
 }
 
 // -------------------------------------------------------------
@@ -130,38 +164,97 @@ function clearServerOrders() {
 }
 
 // -------------------------------------------------------------
-// SERVER-SIDE ADMIN AUTHENTICATION & SESSION MANAGEMENT
+// SERVER-SIDE STORE SETTINGS (Separation of Public and Private Data)
 // -------------------------------------------------------------
-// Admin PIN is stored exclusively on the server (never exposed to frontend client bundle)
-let currentAdminPin = process.env.ADMIN_PIN || '1383';
+const SETTINGS_STORAGE_FILE = path.join(process.cwd(), 'data', 'server_settings.json');
 
-// Active admin sessions: token -> { createdAt, expiresAt }
-const activeAdminSessions = new Map<string, { createdAt: number; expiresAt: number }>();
-
-// Brute-force protection: IP -> { count, lockedUntil }
-interface RateRecord {
-  count: number;
-  lockedUntil?: number;
-  resetAt?: number;
+interface ServerSettingsState {
+  public: Record<string, any>;
+  private: Record<string, any>;
 }
-const loginAttempts = new Map<string, RateRecord>();
-const trackingAttempts = new Map<string, RateRecord>();
-const receiptAttempts = new Map<string, RateRecord>();
 
-// Clean up expired sessions periodically
-setInterval(() => {
-  const now = Date.now();
-  for (const [token, session] of activeAdminSessions.entries()) {
-    if (session.expiresAt <= now) {
-      activeAdminSessions.delete(token);
-    }
+let serverSettingsCache: ServerSettingsState = {
+  public: {
+    storeName: 'ناما | NAMA',
+    slogan: 'از نام و جان برای طعمی ماندگار',
+    shippingCost: 0,
+    freeShippingThreshold: 600000,
+    supportPhone: '09166449409',
+    supportWhatsApp: '09166449409',
+    supportInstagram: 'nama_naturalfood',
+    supportTelegram: 'nama_food_support',
+    supportAddress: '',
+    announcement: '🌿 از نام و جان برای طعمی ماندگار | ضمانت اصالت ۱۰۰٪ طبیعی تمام محصولات با برگه آزمایش معتبر + ارسال رایگان خریدهای بالای ۶۰۰ هزار تومان',
+    isStoreOpen: true,
+    heroBadge: 'محصولات غذایی ۱۰۰٪ طبیعی، سالم و دستچین ایرانی',
+    heroTitle: 'از نام و جان، برای طعمی ماندگار',
+    heroSubtitle: 'سفره‌ای پربرکت با اصیل‌ترین طعم‌های دیار ایران؛ از عسل‌های بکر سبلان و خرمای شکلاتی پیارم تا دوشاب ناب ملایر و زعفران نگین قائنات، بدون مواد افزودنی و با تضمین بازگشت وجه.',
+    heroButtonText: 'مشاهده و خرید محصولات',
+    promoBadge: 'جشنواره اصالت و سلامت ناما',
+    promoTitle: 'از نام و جان، برای طعمی ماندگار',
+    promoSubtitle: 'هر قطره عسل کوهستان و هر دانه خرمای لوکس پیارم در «ناما»، تجلی تعهد به سلامتی و اصالت است. دستچین شده بدون ذره‌ای شکر مصنوعی یا سموم شیمیایی، مستقیم از دستان کشاورزان و زنبورداران امین ایران.',
+    aboutText: 'فروشگاه تخصصی مواد غذایی ارگانیک و سنتی ناما با پایبندی به شعار «از نام و جان برای طعمی ماندگار»، برترین محصولات سالم مزارع، کوهپایه‌ها و نخلستان‌های ایران را مستقیماً به سفره‌های گرم خانواده‌ها می‌رساند.',
+    qualityBadge1: 'برگه آزمایش معتبر',
+    qualityBadge2: 'تضمین ۱۰۰٪ اصالت',
+    qualityBadge3: 'بسته‌بندی ایمن پستی',
+    qualityBadge4: 'ارسال فوری سراسری',
+    customCategories: [
+      {
+        id: 'cat_1791989577701',
+        name: 'زعفران',
+        icon: '✨',
+        description: 'عسله لامصب '
+      }
+    ]
+  },
+  private: {
+    cardNumber: '6037-9918-4521-8763',
+    cardHolder: 'متین جهانبانی (ناما فود)',
+    bankName: 'بانک ملی ایران',
+    shabaNumber: 'IR320170000000108923456001',
+    ntfyTopic: 'nama_store_orders_1383',
+    discountCodes: []
   }
-}, 30 * 60 * 1000);
+};
+
+function initServerSettings() {
+  try {
+    if (fs.existsSync(SETTINGS_STORAGE_FILE)) {
+      const raw = fs.readFileSync(SETTINGS_STORAGE_FILE, 'utf8');
+      const parsed = JSON.parse(raw);
+      if (parsed.public) serverSettingsCache.public = { ...serverSettingsCache.public, ...parsed.public };
+      if (parsed.private) serverSettingsCache.private = { ...serverSettingsCache.private, ...parsed.private };
+    }
+  } catch (err) {
+    console.warn('Notice loading server settings storage:', err);
+  }
+}
+initServerSettings();
+
+function persistServerSettings() {
+  try {
+    const dir = path.dirname(SETTINGS_STORAGE_FILE);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(SETTINGS_STORAGE_FILE, JSON.stringify(serverSettingsCache, null, 2), 'utf8');
+  } catch (err) {
+    console.warn('Notice saving server settings:', err);
+  }
+}
+
+// -------------------------------------------------------------
+// SERVER-SIDE ADMIN AUTHENTICATION & SECURE SESSION MANAGEMENT
+// -------------------------------------------------------------
+initAdminSecurity();
+
+// Rate records for tracking & receipt
+const trackingAttempts = new Map<string, { count: number; resetAt: number; failedCount: number; lockedUntil?: number }>();
+const receiptAttempts = new Map<string, { count: number; resetAt: number; failedCount: number; lockedUntil?: number }>();
+const orderTrackingLockouts = new Map<string, { failedCount: number; lockedUntil?: number }>();
 
 /**
  * Authentication Middleware for all /api/admin/* endpoints
  * - Rejects with 401 if token is missing
- * - Cryptographically verifies token signature via Firebase Admin SDK or validates active server session
+ * - Cryptographically verifies token signature via Firebase Admin SDK or validates persistent server session
  * - Rejects with 403 if token is invalid, forged, expired, or non-admin
  */
 export async function requireAdminAuth(req: express.Request, res: express.Response, next: express.NextFunction) {
@@ -180,14 +273,9 @@ export async function requireAdminAuth(req: express.Request, res: express.Respon
     });
   }
 
-  // 2. Check active server-side session token (issued upon successful PIN login)
-  const session = activeAdminSessions.get(token);
-  if (session) {
-    if (Date.now() < session.expiresAt) {
-      return next();
-    } else {
-      activeAdminSessions.delete(token);
-    }
+  // 2. Check active server-side session token (issued upon successful PIN login, persisted in secure storage)
+  if (validateSessionToken(token)) {
+    return next();
   }
 
   // 3. Cryptographically verify Firebase ID Token using Firebase Admin SDK
@@ -208,83 +296,50 @@ export async function requireAdminAuth(req: express.Request, res: express.Respon
   });
 }
 
-// Admin PIN Login with Brute-Force Rate Limiting
+// Admin PIN Login with Brute-Force Rate Limiting & Persistent Lockout
 app.post('/api/admin/login', async (req, res) => {
   const clientIp = getClientIp(req);
-  const now = Date.now();
-  const attempt = loginAttempts.get(clientIp) || { count: 0, lockedUntil: 0 };
-
-  // Enforce lockout if limit exceeded
-  if (attempt.lockedUntil && attempt.lockedUntil > now) {
-    const remainingMinutes = Math.ceil((attempt.lockedUntil - now) / 60000);
-    return res.status(429).json({
-      error: `تعداد تلاش‌های ناموفق بیش از حد مجاز است. دسترسی شما موقتاً مسدود شد. لطفاً ${remainingMinutes} دقیقه دیگر تلاش فرمایید.`
-    });
-  }
-
   const { pin } = req.body;
-  if (!pin || typeof pin !== 'string') {
-    return res.status(400).json({ error: 'رمز عبور مدیریت الزامی است.' });
+
+  const result = verifyAdminPin(pin, clientIp);
+  if (!result.success) {
+    // Delay response to mitigate automated timing attacks
+    await new Promise((r) => setTimeout(r, 600));
+    return res.status(result.status).json({ error: result.error });
   }
 
-  if (pin.trim() === currentAdminPin) {
-    loginAttempts.delete(clientIp);
-    const sessionToken = crypto.randomBytes(32).toString('hex');
-    activeAdminSessions.set(sessionToken, {
-      createdAt: now,
-      expiresAt: now + 24 * 3600 * 1000 // 24 hours validity
-    });
-    return res.status(200).json({ success: true, token: sessionToken });
-  }
-
-  // Record failed attempt and throttle response
-  attempt.count += 1;
-  if (attempt.count >= 5) {
-    attempt.lockedUntil = now + 15 * 60 * 1000; // 15 minutes lockout
-  }
-  loginAttempts.set(clientIp, attempt);
-
-  // Artificial delay to prevent automated high-speed dictionary attacks
-  await new Promise((r) => setTimeout(r, 600));
-
-  return res.status(401).json({
-    error: attempt.count >= 5
-      ? 'به دلیل تلاش‌های متوالی نادرست، دسترسی شما موقتاً به مدت ۱۵ دقیقه مسدود شد.'
-      : 'رمز عبور مدیریت نادرست است.'
-  });
+  return res.status(200).json({ success: true, token: result.token });
 });
 
-// Admin PIN Change
+// Admin PIN Change (Persistent across server restarts)
 app.post('/api/admin/change-pin', requireAdminAuth, async (req, res) => {
   const { currentPin, newPin } = req.body;
-  if (!currentPin || !newPin || typeof currentPin !== 'string' || typeof newPin !== 'string') {
-    return res.status(400).json({ error: 'رمز فعلی و رمز جدید الزامی هستند.' });
-  }
-  if (currentPin.trim() !== currentAdminPin) {
-    await new Promise((r) => setTimeout(r, 600));
-    return res.status(400).json({ error: 'رمز عبور فعلی نادرست است.' });
-  }
-  if (newPin.trim().length < 4) {
-    return res.status(400).json({ error: 'رمز عبور جدید باید حداقل ۴ کاراکتر باشد.' });
-  }
+  const isVerifiedOwnerByGoogle = Boolean((req as any).adminUser?.email === 'matinjahanbani2024@gmail.com');
 
-  currentAdminPin = newPin.trim();
-
-  // Invalidate all previous active sessions on password change
-  activeAdminSessions.clear();
-
-  // Issue fresh session token
-  const sessionToken = crypto.randomBytes(32).toString('hex');
-  activeAdminSessions.set(sessionToken, {
-    createdAt: Date.now(),
-    expiresAt: Date.now() + 24 * 3600 * 1000
-  });
+  const result = changeAdminPin(currentPin, newPin, isVerifiedOwnerByGoogle);
+  if (!result.success) {
+    return res.status(result.status).json({ error: result.error });
+  }
 
   return res.status(200).json({
     success: true,
-    message: 'رمز عبور مدیریت با موفقیت در سرور تغییر یافت.',
-    token: sessionToken
+    message: 'رمز عبور مدیریت با موفقیت در فضای ذخیره‌سازی امن سرور تغییر یافت و پایدار شد.',
+    token: result.token
   });
+});
+
+// Admin session revocation / logout endpoint
+app.post('/api/admin/logout', requireAdminAuth, (req, res) => {
+  const customHeader = req.headers['x-admin-token'] as string;
+  const authHeader = req.headers.authorization;
+  let token = customHeader;
+  if (!token && authHeader && authHeader.startsWith('Bearer ')) {
+    token = authHeader.slice(7).trim();
+  }
+  if (token) {
+    revokeSession(token);
+  }
+  return res.status(200).json({ success: true, message: 'نشست مدیریت با موفقیت ابطال شد.' });
 });
 
 // -------------------------------------------------------------
@@ -293,235 +348,37 @@ app.post('/api/admin/change-pin', requireAdminAuth, async (req, res) => {
 
 /**
  * 1. POST /api/orders/create
- * Server-authoritative order creation:
- * - Recalculates all product prices directly from database
- * - Validates inventory and decrements stock atomically
- * - Calculates shipping and verified coupon discount
- * - Protects against fake totals or client-side tampering
- * - Sanitizes ntfy alert (never exposes full phone or detailed address)
+ * Server-authoritative atomic order creation:
+ * - Mutex-serialized order creation preventing race conditions and double-stock deduction
+ * - Idempotency-keyed duplicate request shielding
+ * - Positive integer quantity validation (handles duplicate product IDs in cart by aggregate sum)
+ * - Strict server-side price recalculation from database
+ * - Zero-collision Order ID generation
+ * - Sanitized push alert to store manager
  */
 app.post('/api/orders/create', async (req, res) => {
   try {
-    const {
-      customerName,
-      customerPhone,
-      province,
-      city,
-      address,
-      postalCode,
-      items,
-      discountCode,
-      paymentMethod = 'card_to_card',
-      cardLast4,
-      paymentReference,
-      receiptImage,
-      notes,
-    } = req.body;
+    const idempotencyKey = (req.headers['idempotency-key'] as string) || req.body.idempotencyKey;
+    const result = await processOrderCreation(
+      { ...req.body, idempotencyKey },
+      db,
+      adminDb,
+      serverSettingsCache,
+      persistServerOrder
+    );
 
-    // Contact & postal validation
-    if (!customerName || typeof customerName !== 'string' || customerName.trim().length < 2) {
-      return res.status(400).json({ error: 'نام و نام خانوادگی خریدار الزامی است.' });
+    if (!result.success) {
+      return res.status(result.status).json({ error: result.error });
     }
 
-    const cleanPhone = toEnglishDigits(customerPhone || '').replace(/[\s-]/g, '');
-    if (!cleanPhone || cleanPhone.length < 10) {
-      return res.status(400).json({ error: 'شماره تلفن همراه معتبر نیست.' });
-    }
-
-    if (!address || typeof address !== 'string' || address.trim().length < 5) {
-      return res.status(400).json({ error: 'آدرس پستی کامل الزامی است.' });
-    }
-
-    if (!Array.isArray(items) || items.length === 0) {
-      return res.status(400).json({ error: 'سبد خرید خالی است.' });
-    }
-
-    // Fetch store settings for shipping & discounts
-    let storeShippingCost = 45000;
-    let freeShippingThreshold = 0;
-    let ntfyTopic = 'nama_store_orders_1383';
-    let availableCoupons: any[] = [];
-
-    try {
-      const settingsSnap = await getDoc(doc(db, 'settings', 'main'));
-      if (settingsSnap.exists()) {
-        const sData = settingsSnap.data();
-        if (typeof sData.shippingCost === 'number') storeShippingCost = sData.shippingCost;
-        if (typeof sData.freeShippingThreshold === 'number') freeShippingThreshold = sData.freeShippingThreshold;
-        if (sData.ntfyTopic) ntfyTopic = sData.ntfyTopic;
-        if (Array.isArray(sData.discountCodes)) availableCoupons = sData.discountCodes;
-      }
-    } catch (e) {
-      console.warn('Could not read settings from Firestore:', e);
-    }
-
-    // Validate products and recalculate prices from database
-    let computedSubtotal = 0;
-    const verifiedItems: any[] = [];
-    const stockUpdates: { id: string; newStock: number }[] = [];
-
-    for (const item of items) {
-      const productId = item.productId || item.product?.id;
-      const quantity = Math.max(1, Number(item.quantity) || 1);
-
-      if (!productId) {
-        return res.status(400).json({ error: 'اطلاعات محصول نامعتبر است.' });
-      }
-
-      const prodRef = doc(db, 'products', productId);
-      const prodSnap = await getDoc(prodRef);
-
-      if (!prodSnap.exists()) {
-        return res.status(400).json({ error: `محصول با شناسه ${productId} در پایگاه داده یافت نشد.` });
-      }
-
-      const prodData = prodSnap.data();
-      const currentStock = Number(prodData.stock ?? 10);
-
-      if (currentStock < quantity) {
-        return res.status(400).json({
-          error: `موجودی محصول «${prodData.name}» کافی نیست (موجودی فعلی: ${currentStock} عدد).`
-        });
-      }
-
-      const realPrice = Number(prodData.price) || 0;
-      const itemTotal = realPrice * quantity;
-      computedSubtotal += itemTotal;
-
-      verifiedItems.push({
-        productId,
-        name: prodData.name,
-        price: realPrice,
-        weight: prodData.weight || 'بسته استاندارد',
-        image: prodData.image || '',
-        quantity,
-      });
-
-      stockUpdates.push({
-        id: productId,
-        newStock: Math.max(0, currentStock - quantity)
-      });
-    }
-
-    // Free shipping threshold check
-    let appliedShipping = storeShippingCost;
-    if (freeShippingThreshold > 0 && computedSubtotal >= freeShippingThreshold) {
-      appliedShipping = 0;
-    }
-
-    // Verify discount coupon
-    let computedDiscount = 0;
-    let validDiscountCode: string | undefined = undefined;
-
-    if (discountCode && typeof discountCode === 'string') {
-      const cleanCode = discountCode.trim().toUpperCase();
-      const matched = availableCoupons.find(
-        (c) => c.code.toUpperCase() === cleanCode && c.isActive
-      );
-
-      if (matched) {
-        if (!matched.minPurchase || computedSubtotal >= matched.minPurchase) {
-          if (matched.type === 'percent') {
-            computedDiscount = Math.round((computedSubtotal * matched.amount) / 100);
-            if (matched.maxDiscount && computedDiscount > matched.maxDiscount) {
-              computedDiscount = matched.maxDiscount;
-            }
-          } else {
-            computedDiscount = matched.amount;
-          }
-          validDiscountCode = cleanCode;
-        }
-      }
-    }
-
-    const computedTotalAmount = Math.max(0, computedSubtotal + appliedShipping - computedDiscount);
-
-    // Create unique order ID
-    const orderId = `NM-${Math.floor(10000 + Math.random() * 90000)}`;
-
-    const newOrder = {
-      id: orderId,
-      customerName: customerName.trim(),
-      customerPhone: cleanPhone,
-      province: (province || 'تهران').trim(),
-      city: (city || '').trim(),
-      address: address.trim(),
-      postalCode: toEnglishDigits(postalCode || '').replace(/\D/g, '').slice(0, 10),
-      items: verifiedItems,
-      subtotal: computedSubtotal,
-      shippingCost: appliedShipping,
-      totalAmount: computedTotalAmount,
-      discountCode: validDiscountCode,
-      discountAmount: computedDiscount > 0 ? computedDiscount : undefined,
-      status: paymentMethod === 'card_to_card' ? 'paid_pending_approval' : 'pending_receipt',
-      paymentMethod,
-      cardLast4: cardLast4 ? toEnglishDigits(String(cardLast4)).replace(/\D/g, '').slice(0, 4) : undefined,
-      paymentReference: paymentReference ? toEnglishDigits(String(paymentReference)).trim() : undefined,
-      receiptImage: receiptImage || undefined,
-      notes: notes ? String(notes).trim() : undefined,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
-
-    // Clean undefined fields for Firestore compatibility
-    const cleanOrder: Record<string, any> = { ...newOrder };
-    Object.keys(cleanOrder).forEach(k => {
-      if (cleanOrder[k] === undefined) {
-        delete cleanOrder[k];
-      }
-    });
-
-    // Save order in Firestore
-    try {
-      await setDoc(doc(db, 'orders', orderId), cleanOrder);
-    } catch (_fErr) {}
-
-    // Persist in secure server-side orders cache (shields customer PII)
-    persistServerOrder(cleanOrder);
-
-    // Decrement stock in Firestore for all items
-    for (const update of stockUpdates) {
-      try {
-        await updateDoc(doc(db, 'products', update.id), {
-          stock: update.newStock,
-          updatedAt: new Date().toISOString()
-        });
-      } catch (err) {
-        console.warn(`Could not update stock for product ${update.id}:`, err);
-      }
-    }
-
-    // Send privacy-preserving instant ntfy push notification to store manager
-    // (Customer phone and full street address are never sent to third-party public notification servers)
-    try {
-      const cleanTopic = ntfyTopic.trim().replace(/^https?:\/\/ntfy\.sh\//, '');
-      if (cleanTopic) {
-        const maskedName = newOrder.customerName.length > 3
-          ? `${newOrder.customerName.slice(0, 3)}***`
-          : newOrder.customerName;
-
-        await fetch(`https://ntfy.sh/${cleanTopic}`, {
-          method: 'POST',
-          headers: {
-            'Title': encodeURIComponent(`🌿 سفارش جدید ناما (${orderId})`),
-            'Priority': '4',
-            'Tags': 'shopping_cart,package,dollar'
-          },
-          body: `سفارش جدید ${orderId} به مبلغ ${newOrder.totalAmount.toLocaleString('fa-IR')} تومان ثبت شد.\nنام: ${maskedName}\nشهر: ${newOrder.city}\n(جزئیات کامل، شماره تماس و آدرس فقط در پنل امن مدیریت ثبت گردید)`
-        });
-      }
-    } catch (pushErr) {
-      console.warn('ntfy push alert notice:', pushErr);
-    }
-
-    return res.status(200).json({
+    return res.status(result.status).json({
       success: true,
-      order: newOrder
+      order: result.order
     });
   } catch (err: any) {
-    console.error('Server order creation error:', err);
+    console.error('Server order creation exception:', err);
     return res.status(500).json({
-      error: 'خطا در ثبت و اعتبارسنجی سفارش: ' + (err?.message || 'مجدداً تلاش فرمایید')
+      error: 'خطای سیستمی در فرآیند ثبت سفارش: ' + (err?.message || 'مجدداً تلاش فرمایید')
     });
   }
 });
@@ -530,21 +387,35 @@ app.post('/api/orders/create', async (req, res) => {
  * 2. POST /api/orders/track
  * Secure customer tracking lookup:
  * - Requires matching Order ID AND Customer Mobile Phone (Mandatory)
- * - Protects against unauthorized scraping or enumeration of customer data
- * - Returns only sanitized tracking status and item summary (omits full address and financial details)
+ * - Anti brute-force: locks out both abusive IP and targeted Order ID
+ * - Strictly enforces full 11-digit Iranian mobile comparison
+ * - Minimizes customer PII returned (omits address, phone, notes, card data)
  */
 app.post('/api/orders/track', async (req, res) => {
   const clientIp = getClientIp(req);
   const now = Date.now();
-  const rate = trackingAttempts.get(clientIp) || { count: 0, resetAt: now + 60000 };
+  const rate = trackingAttempts.get(clientIp) || { count: 0, resetAt: now + 60000, failedCount: 0 };
+
+  // Anti-brute force lockout per IP
+  if (rate.lockedUntil && rate.lockedUntil > now) {
+    const remainingMinutes = Math.ceil((rate.lockedUntil - now) / 60000);
+    return res.status(429).json({
+      error: `تعداد تلاش‌های ناموفق استعلام بیش از حد مجاز است. دسترسی موقتاً مسدود شد. لطفاً ${remainingMinutes} دقیقه دیگر تلاش فرمایید.`
+    });
+  }
+
   if (now > (rate.resetAt || 0)) {
     rate.count = 0;
     rate.resetAt = now + 60000;
   }
   rate.count += 1;
   trackingAttempts.set(clientIp, rate);
-  if (rate.count > 25) {
-    return res.status(429).json({ error: 'تعداد استعلام‌های شما بیش از حد مجاز است. لطفاً یک دقیقه دیگر تلاش فرمایید.' });
+
+  // Rate limit: Max 10 tracking queries per minute per IP
+  if (rate.count > 10) {
+    return res.status(429).json({
+      error: 'تعداد استعلام‌های پیگیری سفارش بیش از حد مجاز است. لطفاً یک دقیقه دیگر تلاش فرمایید.'
+    });
   }
 
   try {
@@ -555,12 +426,21 @@ app.post('/api/orders/track', async (req, res) => {
     }
 
     const cleanId = orderId.trim().toUpperCase();
-    const cleanPhone = toEnglishDigits(phone || '').replace(/[\s-]/g, '');
+    const cleanPhone = normalizeIranianPhone(phone || '');
 
-    // MANDATORY phone requirement to prevent brute-force order enumeration
-    if (!cleanPhone || cleanPhone.length < 10) {
+    // Strict validation of Iranian mobile format (11 digits, starts with 09)
+    if (!cleanPhone || !isValidIranianMobile(cleanPhone)) {
       return res.status(400).json({
-        error: 'شماره تلفن همراه خریدار جهت پیگیری سفارش الزامی است و باید حداقل ۱۰ رقم باشد.'
+        error: 'شماره تلفن همراه معتبر ۱۱ رقمی (مثال: ۰۹۱۲۳۴۵۶۷۸۹) جهت پیگیری سفارش الزامی است.'
+      });
+    }
+
+    // Per-order ID brute-force protection
+    const orderLock = orderTrackingLockouts.get(cleanId);
+    if (orderLock?.lockedUntil && orderLock.lockedUntil > now) {
+      const remainingMinutes = Math.ceil((orderLock.lockedUntil - now) / 60000);
+      return res.status(429).json({
+        error: `استعلام این سفارش به دلیل تلاش‌های ناموفق مکرر موقتاً مسدود شده است. لطفاً ${remainingMinutes} دقیقه دیگر تلاش فرمایید.`
       });
     }
 
@@ -577,25 +457,55 @@ app.post('/api/orders/track', async (req, res) => {
     }
 
     if (!orderData) {
+      rate.failedCount = (rate.failedCount || 0) + 1;
+      if (rate.failedCount >= 5) {
+        rate.lockedUntil = now + 15 * 60 * 1000; // 15 minute lockout
+      }
+      trackingAttempts.set(clientIp, rate);
+
+      const ordLock = orderTrackingLockouts.get(cleanId) || { failedCount: 0 };
+      ordLock.failedCount += 1;
+      if (ordLock.failedCount >= 5) {
+        ordLock.lockedUntil = now + 15 * 60 * 1000;
+      }
+      orderTrackingLockouts.set(cleanId, ordLock);
+
       return res.status(404).json({ error: 'سفارشی با این شناسه در سامانه یافت نشد.' });
     }
 
-    const storedPhone = toEnglishDigits(orderData.customerPhone || '').replace(/[\s-]/g, '');
+    const storedPhone = normalizeIranianPhone(orderData.customerPhone || '');
 
-    // Security check: Phone must match the order
-    if (!storedPhone.endsWith(cleanPhone.slice(-8)) && !cleanPhone.endsWith(storedPhone.slice(-8))) {
+    // Full 11-digit normalized phone comparison - strict equality check (never partial or last 8 digits)
+    if (!storedPhone || cleanPhone !== storedPhone) {
+      rate.failedCount = (rate.failedCount || 0) + 1;
+      if (rate.failedCount >= 5) {
+        rate.lockedUntil = now + 15 * 60 * 1000;
+      }
+      trackingAttempts.set(clientIp, rate);
+
+      const ordLock = orderTrackingLockouts.get(cleanId) || { failedCount: 0 };
+      ordLock.failedCount += 1;
+      if (ordLock.failedCount >= 5) {
+        ordLock.lockedUntil = now + 15 * 60 * 1000;
+      }
+      orderTrackingLockouts.set(cleanId, ordLock);
+
       return res.status(403).json({
         error: 'شماره تلفن همراه وارد شده با شماره ثبت شده در این سفارش مطابقت ندارد.'
       });
     }
 
-    // Return sanitized public tracking info (omit customer full address/financial details)
+    // Reset failed counters upon successful match
+    rate.failedCount = 0;
+    trackingAttempts.set(clientIp, rate);
+    orderTrackingLockouts.delete(cleanId);
+
+    // Return strictly minimized public tracking info (omits phone, full address, notes, payment secrets)
     return res.status(200).json({
       success: true,
       order: {
         id: orderData.id,
         customerName: orderData.customerName,
-        customerPhone: orderData.customerPhone ? `${orderData.customerPhone.slice(0, 4)}***${orderData.customerPhone.slice(-4)}` : '',
         status: orderData.status,
         trackingCode: orderData.trackingCode || null,
         totalAmount: orderData.totalAmount,
@@ -620,19 +530,31 @@ app.post('/api/orders/track', async (req, res) => {
 /**
  * 3. POST /api/orders/upload-receipt
  * Allows a customer to attach their transfer receipt afterwards
+ * Reinforced with full-phone comparison, IP lockout, and rate limiting
  */
 app.post('/api/orders/upload-receipt', async (req, res) => {
   const clientIp = getClientIp(req);
   const now = Date.now();
-  const rate = receiptAttempts.get(clientIp) || { count: 0, resetAt: now + 60000 };
+  const rate = receiptAttempts.get(clientIp) || { count: 0, resetAt: now + 60000, failedCount: 0 };
+
+  if (rate.lockedUntil && rate.lockedUntil > now) {
+    const remainingMinutes = Math.ceil((rate.lockedUntil - now) / 60000);
+    return res.status(429).json({
+      error: `تعداد تلاش‌های ناموفق بیش از حد مجاز است. دسترسی موقتاً مسدود شد. لطفاً ${remainingMinutes} دقیقه دیگر تلاش فرمایید.`
+    });
+  }
+
   if (now > (rate.resetAt || 0)) {
     rate.count = 0;
     rate.resetAt = now + 60000;
   }
   rate.count += 1;
   receiptAttempts.set(clientIp, rate);
-  if (rate.count > 10) {
-    return res.status(429).json({ error: 'تعداد تلاش‌های ثبت رسید بیش از حد مجاز است.' });
+
+  if (rate.count > 5) {
+    return res.status(429).json({
+      error: 'تعداد تلاش‌های ثبت رسید بیش از حد مجاز است. لطفاً یک دقیقه دیگر تلاش فرمایید.'
+    });
   }
 
   try {
@@ -643,10 +565,10 @@ app.post('/api/orders/upload-receipt', async (req, res) => {
     }
 
     const cleanId = orderId.trim().toUpperCase();
-    const cleanPhone = toEnglishDigits(phone || '').replace(/[\s-]/g, '');
+    const cleanPhone = normalizeIranianPhone(phone || '');
 
-    if (!cleanPhone || cleanPhone.length < 10) {
-      return res.status(400).json({ error: 'شماره تلفن همراه ثبت شده در سفارش الزامی است.' });
+    if (!cleanPhone || !isValidIranianMobile(cleanPhone)) {
+      return res.status(400).json({ error: 'شماره تلفن همراه معتبر ۱۱ رقمی ثبت شده در سفارش الزامی است.' });
     }
 
     let orderData = serverOrdersCache.get(cleanId);
@@ -661,14 +583,28 @@ app.post('/api/orders/upload-receipt', async (req, res) => {
     }
 
     if (!orderData) {
+      rate.failedCount = (rate.failedCount || 0) + 1;
+      if (rate.failedCount >= 5) {
+        rate.lockedUntil = now + 15 * 60 * 1000;
+      }
+      receiptAttempts.set(clientIp, rate);
       return res.status(404).json({ error: 'سفارش یافت نشد.' });
     }
 
-    const storedPhone = toEnglishDigits(orderData.customerPhone || '').replace(/[\s-]/g, '');
+    const storedPhone = normalizeIranianPhone(orderData.customerPhone || '');
 
-    if (!storedPhone.endsWith(cleanPhone.slice(-8)) && !cleanPhone.endsWith(storedPhone.slice(-8))) {
-      return res.status(403).json({ error: 'شماره همراه با این سفارش مطابقت ندارد.' });
+    // Full 11-digit normalized phone comparison (strict equality, no partial comparison)
+    if (!storedPhone || cleanPhone !== storedPhone) {
+      rate.failedCount = (rate.failedCount || 0) + 1;
+      if (rate.failedCount >= 5) {
+        rate.lockedUntil = now + 15 * 60 * 1000;
+      }
+      receiptAttempts.set(clientIp, rate);
+      return res.status(403).json({ error: 'شماره تلفن همراه با این سفارش مطابقت ندارد.' });
     }
+
+    rate.failedCount = 0;
+    receiptAttempts.set(clientIp, rate);
 
     orderData.receiptImage = receiptImage;
     if (cardLast4) orderData.cardLast4 = toEnglishDigits(String(cardLast4)).replace(/\D/g, '').slice(0, 4);
@@ -687,16 +623,79 @@ app.post('/api/orders/upload-receipt', async (req, res) => {
       });
     } catch (_fErr) {}
 
-    return res.status(200).json({ success: true, message: 'رسید واریز با موفقیت ثبت شد.' });
+    return res.status(200).json({
+      success: true,
+      message: 'رسید واریز با موفقیت ثبت شد و در انتظار تأیید مدیریت قرار گرفت.'
+    });
   } catch (err: any) {
     return res.status(500).json({ error: 'خطا در ثبت رسید: ' + err.message });
   }
+});
+
+/**
+ * 4. POST /api/checkout/payment-info
+ * Provides official store bank details strictly to an active customer during checkout
+ * Rate-limited and requires valid customer mobile phone
+ */
+app.post('/api/checkout/payment-info', async (req, res) => {
+  const clientIp = getClientIp(req);
+  const now = Date.now();
+  const rate = trackingAttempts.get(clientIp) || { count: 0, resetAt: now + 60000, failedCount: 0 };
+  if (now > (rate.resetAt || 0)) {
+    rate.count = 0;
+    rate.resetAt = now + 60000;
+  }
+  rate.count += 1;
+  trackingAttempts.set(clientIp, rate);
+  if (rate.count > 15) {
+    return res.status(429).json({ error: 'درخواست‌های شما بیش از حد مجاز است. لطفاً کمی صبر فرمایید.' });
+  }
+
+  const { customerPhone } = req.body;
+  if (!customerPhone || !isValidIranianMobile(customerPhone)) {
+    return res.status(400).json({ error: 'شماره تلفن همراه معتبر جهت دریافت اطلاعات کارت الزامی است.' });
+  }
+
+  return res.status(200).json({
+    success: true,
+    bankInfo: {
+      bankName: serverSettingsCache.private.bankName || 'بانک ملی ایران',
+      cardNumber: serverSettingsCache.private.cardNumber || '6037-9918-4521-8763',
+      cardHolder: serverSettingsCache.private.cardHolder || 'متین جهانبانی (ناما فود)',
+      shabaNumber: serverSettingsCache.private.shabaNumber || 'IR320170000000108923456001',
+    }
+  });
+});
+
+/**
+ * 5. GET /api/settings/public
+ * Public store settings: Store name, slogan, working hours, shipping costs, CMS texts
+ * Strictly strips banking info, secret credentials, ntfy topics, and admin PINs
+ */
+app.get('/api/settings/public', (_req, res) => {
+  return res.status(200).json({
+    success: true,
+    settings: serverSettingsCache.public
+  });
 });
 
 // -------------------------------------------------------------
 // ADMIN MANAGEMENT ENDPOINTS (Server-Side Verified Operations)
 // ALL PROTECTED WITH requireAdminAuth (401 on missing auth, 403 on invalid auth)
 // -------------------------------------------------------------
+
+// Get full merged store settings (for authenticated admin panel only)
+app.get('/api/admin/settings', requireAdminAuth, async (_req, res) => {
+  try {
+    const merged = {
+      ...serverSettingsCache.public,
+      ...serverSettingsCache.private,
+    };
+    return res.status(200).json({ success: true, settings: merged });
+  } catch (err: any) {
+    return res.status(500).json({ error: 'خطا در دریافت تنظیمات مدیریت: ' + err.message });
+  }
+});
 
 // Save or update product
 app.post('/api/admin/products/save', requireAdminAuth, async (req, res) => {
@@ -726,12 +725,11 @@ app.post('/api/admin/products/save', requireAdminAuth, async (req, res) => {
     });
 
     if (adminDb) {
-      await adminDb.collection('products').doc(cleanProduct.id).set(cleanProduct);
-    } else {
       try {
-        await setDoc(doc(db, 'products', cleanProduct.id), cleanProduct);
-      } catch (_fErr: any) {
-        // Locked by firestore.rules to isAdmin(). Client SDK authenticated by matinjahanbani2024@gmail.com performs real-time sync
+        await adminDb.collection('products').doc(cleanProduct.id).set(cleanProduct);
+      } catch (dbErr: any) {
+        console.error('Database product write error:', dbErr);
+        return res.status(500).json({ error: 'خطا در ذخیره محصول در پایگاه داده: ' + dbErr.message });
       }
     }
     return res.status(200).json({ success: true, product: cleanProduct });
@@ -749,11 +747,11 @@ app.post('/api/admin/products/delete', requireAdminAuth, async (req, res) => {
       return res.status(400).json({ error: 'شناسه محصول الزامی است.' });
     }
     if (adminDb) {
-      await adminDb.collection('products').doc(productId).delete();
-    } else {
       try {
-        await deleteDoc(doc(db, 'products', productId));
-      } catch (_fErr: any) {}
+        await adminDb.collection('products').doc(productId).delete();
+      } catch (dbErr: any) {
+        return res.status(500).json({ error: 'خطا در حذف محصول از پایگاه داده: ' + dbErr.message });
+      }
     }
     return res.status(200).json({ success: true });
   } catch (err: any) {
@@ -766,17 +764,14 @@ app.post('/api/admin/products/delete', requireAdminAuth, async (req, res) => {
 app.post('/api/admin/products/clear', requireAdminAuth, async (_req, res) => {
   try {
     if (adminDb) {
-      const snap = await adminDb.collection('products').get();
-      for (const d of snap.docs) {
-        await d.ref.delete().catch(() => {});
-      }
-    } else {
       try {
-        const snap = await getDocs(collection(db, 'products'));
+        const snap = await adminDb.collection('products').get();
         for (const d of snap.docs) {
-          await deleteDoc(doc(db, 'products', d.id)).catch(() => {});
+          await d.ref.delete();
         }
-      } catch (_fErr: any) {}
+      } catch (dbErr: any) {
+        return res.status(500).json({ error: 'خطا در پاک‌سازی کاتالوگ از پایگاه داده: ' + dbErr.message });
+      }
     }
     return res.status(200).json({ success: true });
   } catch (err: any) {
@@ -784,20 +779,54 @@ app.post('/api/admin/products/clear', requireAdminAuth, async (_req, res) => {
   }
 });
 
-// Update store settings
+// Update store settings (strictly separates public and private data)
 app.post('/api/admin/settings/update', requireAdminAuth, async (req, res) => {
   try {
     const settings = req.body;
     if (!settings || !settings.storeName) {
       return res.status(400).json({ error: 'اطلاعات تنظیمات نامعتبر است.' });
     }
-    if (adminDb) {
-      await adminDb.collection('settings').doc('main').set(settings);
-    } else {
-      try {
-        await setDoc(doc(db, 'settings', 'main'), settings);
-      } catch (_fErr: any) {}
+
+    const publicKeys = [
+      'storeName', 'slogan', 'shippingCost', 'freeShippingThreshold', 'supportPhone',
+      'supportWhatsApp', 'supportInstagram', 'supportTelegram', 'supportAddress',
+      'announcement', 'isStoreOpen', 'storeClosedMessage', 'shippingNote',
+      'heroBadge', 'heroTitle', 'heroSubtitle', 'heroButtonText',
+      'promoBadge', 'promoTitle', 'promoSubtitle', 'aboutText',
+      'qualityBadge1', 'qualityBadge2', 'qualityBadge3', 'qualityBadge4',
+      'customCategories', 'zarinpalEnabled', 'zarinpalSandbox'
+    ];
+
+    const privateKeys = [
+      'cardNumber', 'cardHolder', 'bankName', 'shabaNumber', 'ntfyTopic',
+      'discountCodes', 'zarinpalMerchantId'
+    ];
+
+    const newPublic: Record<string, any> = {};
+    for (const k of publicKeys) {
+      if (settings[k] !== undefined) newPublic[k] = settings[k];
     }
+
+    const newPrivate: Record<string, any> = {};
+    for (const k of privateKeys) {
+      if (settings[k] !== undefined) newPrivate[k] = settings[k];
+    }
+
+    serverSettingsCache.public = { ...serverSettingsCache.public, ...newPublic };
+    serverSettingsCache.private = { ...serverSettingsCache.private, ...newPrivate };
+    persistServerSettings();
+
+    // Synchronize to Firestore if adminDb is available
+    if (adminDb) {
+      try {
+        await adminDb.collection('settings').doc('public').set(newPublic, { merge: true });
+        await adminDb.collection('settings').doc('private').set(newPrivate, { merge: true });
+      } catch (dbErr: any) {
+        console.error('Firestore adminDb settings update error:', dbErr);
+        return res.status(500).json({ error: 'خطا در ذخیره تنظیمات در پایگاه داده: ' + dbErr.message });
+      }
+    }
+
     return res.status(200).json({ success: true });
   } catch (err: any) {
     return res.status(500).json({ error: 'خطا در ذخیره تنظیمات: ' + err.message });
@@ -824,11 +853,11 @@ app.post('/api/admin/orders/update', requireAdminAuth, async (req, res) => {
       persistServerOrder(existing);
     }
     if (adminDb) {
-      await adminDb.collection('orders').doc(orderId).update(updateData);
-    } else {
       try {
-        await updateDoc(doc(db, 'orders', orderId), updateData);
-      } catch (_fErr: any) {}
+        await adminDb.collection('orders').doc(orderId).update(updateData);
+      } catch (dbErr: any) {
+        return res.status(500).json({ error: 'خطا در بروزرسانی سفارش در پایگاه داده: ' + dbErr.message });
+      }
     }
     return res.status(200).json({ success: true });
   } catch (err: any) {
@@ -845,11 +874,11 @@ app.post('/api/admin/orders/delete', requireAdminAuth, async (req, res) => {
     }
     removeServerOrder(orderId);
     if (adminDb) {
-      await adminDb.collection('orders').doc(orderId).delete();
-    } else {
       try {
-        await deleteDoc(doc(db, 'orders', orderId));
-      } catch (_fErr: any) {}
+        await adminDb.collection('orders').doc(orderId).delete();
+      } catch (dbErr: any) {
+        return res.status(500).json({ error: 'خطا در حذف سفارش از پایگاه داده: ' + dbErr.message });
+      }
     }
     return res.status(200).json({ success: true });
   } catch (err: any) {
@@ -863,17 +892,14 @@ app.post('/api/admin/orders/clear', requireAdminAuth, async (_req, res) => {
   try {
     clearServerOrders();
     if (adminDb) {
-      const snap = await adminDb.collection('orders').get();
-      for (const d of snap.docs) {
-        await d.ref.delete().catch(() => {});
-      }
-    } else {
       try {
-        const snap = await getDocs(collection(db, 'orders'));
+        const snap = await adminDb.collection('orders').get();
         for (const d of snap.docs) {
-          await deleteDoc(doc(db, 'orders', d.id)).catch(() => {});
+          await d.ref.delete();
         }
-      } catch (_fErr: any) {}
+      } catch (dbErr: any) {
+        return res.status(500).json({ error: 'خطا در پاکسازی سفارشات از پایگاه داده: ' + dbErr.message });
+      }
     }
     return res.status(200).json({ success: true });
   } catch (err: any) {

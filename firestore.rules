@@ -76,11 +76,21 @@ service cloud.firestore {
     }
 
     // 4. Store settings
-    // Read: public (store info, contact numbers, working hours, shipping costs)
-    // Write: strictly restricted to admin
-    match /settings/{settingId} {
+    // Public store info: store name, working hours, shipping costs, banners, social links
+    match /settings/public {
       allow read: if true;
       allow write: if isAdmin();
+    }
+
+    // Private settings: banking info, ntfy topics, admin configs, credentials
+    // Strictly restricted to authenticated admins
+    match /settings/private {
+      allow read, write: if isAdmin();
+    }
+
+    // Default deny for all other /settings documents (e.g., legacy main, admin, secrets)
+    match /settings/{otherSetting} {
+      allow read, write: if isAdmin();
     }
 
     // 5. Connection test collection (Read-only single doc, no writes)

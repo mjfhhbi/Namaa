@@ -11,6 +11,7 @@ import {
 import { db, handleFirestoreError, OperationType } from '../firebase';
 import { Product, Order, StoreSettings, OrderStatus } from '../types';
 import { DEFAULT_PRODUCTS, DEFAULT_SETTINGS, SAMPLE_ORDERS } from '../data/defaultProducts';
+import { normalizeIranianPhone, isValidIranianMobile } from '../utils/phone';
 
 const LS_PRODUCTS_KEY = 'nama_store_products_v2';
 const LS_ORDERS_KEY = 'nama_store_orders_v2';
@@ -127,44 +128,84 @@ export function saveLocalOrders(_orders: Order[]): void {
 // FIRESTORE API WITH LOCAL SYNC
 // -------------------------------------------------------------
 
-// Fetch or seed settings
+export function extractPublicSettings(s: StoreSettings): Record<string, any> {
+  const publicKeys: (keyof StoreSettings)[] = [
+    'storeName', 'slogan', 'shippingCost', 'freeShippingThreshold', 'supportPhone',
+    'supportWhatsApp', 'supportInstagram', 'supportTelegram', 'supportAddress',
+    'announcement', 'isStoreOpen', 'storeClosedMessage', 'shippingNote',
+    'heroBadge', 'heroTitle', 'heroSubtitle', 'heroButtonText',
+    'promoBadge', 'promoTitle', 'promoSubtitle', 'aboutText',
+    'qualityBadge1', 'qualityBadge2', 'qualityBadge3', 'qualityBadge4',
+    'customCategories', 'zarinpalEnabled', 'zarinpalSandbox'
+  ];
+  const res: Record<string, any> = {};
+  for (const k of publicKeys) {
+    if (s[k] !== undefined) res[k] = s[k];
+  }
+  return res;
+}
+
+// Fetch public settings from Firestore settings/public (accessible to all customers)
 export async function fetchStoreSettings(): Promise<StoreSettings> {
   const path = 'settings';
   try {
-    const docRef = doc(db, path, 'main');
+    const docRef = doc(db, path, 'public');
     const snap = await getDoc(docRef);
     if (snap.exists()) {
-      const data = snap.data() as StoreSettings;
-      saveLocalSettings(data);
-      return data;
-    } else {
-      // Seed default settings to Firestore
-      const initial = getLocalSettings();
-      await setDoc(docRef, initial);
-      return initial;
+      const publicData = snap.data();
+      const current = getLocalSettings();
+      const merged = { ...current, ...publicData };
+      saveLocalSettings(merged);
+      return merged;
     }
   } catch (error) {
-    console.warn('Firestore settings fetch notice, using cached settings:', error);
-    return getLocalSettings();
+    console.warn('Firestore public settings fetch notice, using cached settings:', error);
   }
+  return getLocalSettings();
+}
+
+// Fetch full settings including private banking/ntfy data (strictly for authenticated admin)
+export async function fetchAdminSettings(): Promise<StoreSettings> {
+  try {
+    const res = await fetch('/api/admin/settings', {
+      headers: getAdminAuthHeaders(),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      if (data?.success && data?.settings) {
+        saveLocalSettings(data.settings);
+        return data.settings as StoreSettings;
+      }
+    }
+  } catch (e) {
+    console.warn('Could not fetch admin settings from server:', e);
+  }
+  return getLocalSettings();
 }
 
 export async function updateStoreSettings(newSettings: StoreSettings): Promise<void> {
   saveLocalSettings(newSettings);
   const path = 'settings';
-  // 1. Server-side proxy save with admin auth
-  fetch('/api/admin/settings/update', {
+
+  // 1. Server-side authoritative save with admin auth (splits public and private data)
+  const res = await fetch('/api/admin/settings/update', {
     method: 'POST',
     headers: getAdminAuthHeaders(),
     body: JSON.stringify(newSettings),
-  }).catch(() => {});
+  });
 
-  // 2. Direct Firestore save
+  if (!res.ok) {
+    const errData = await res.json().catch(() => null);
+    throw new Error(errData?.error || 'خطا در ذخیره تنظیمات روی سرور');
+  }
+
+  // 2. Direct Firestore save to settings/public for real-time customer reflection
   try {
-    const docRef = doc(db, path, 'main');
-    await setDoc(docRef, newSettings);
+    const publicData = extractPublicSettings(newSettings);
+    const docRef = doc(db, path, 'public');
+    await setDoc(docRef, publicData, { merge: true });
   } catch (error) {
-    console.warn('Direct Firestore settings update notice:', error);
+    console.warn('Direct Firestore public settings update notice:', error);
   }
 }
 
@@ -213,8 +254,38 @@ export function sanitizeForFirestore<T extends Record<string, any>>(obj: T): Rec
 export async function saveProduct(product: Product): Promise<void> {
   // Clean product of any undefined fields
   const cleanProduct = sanitizeForFirestore(product) as Product;
+  let savedOnServer = false;
 
-  // Update local immediately so UI reflects product instantly
+  // 1. Server-side authoritative write with admin auth
+  try {
+    const res = await fetch('/api/admin/products/save', {
+      method: 'POST',
+      headers: getAdminAuthHeaders(),
+      body: JSON.stringify(cleanProduct),
+    });
+    if (res.ok) {
+      savedOnServer = true;
+    } else {
+      const errData = await res.json().catch(() => null);
+      if (errData?.error) throw new Error(errData.error);
+    }
+  } catch (err: any) {
+    if (err.message && !err.message.includes('Failed to fetch')) {
+      throw err;
+    }
+  }
+
+  // 2. Direct client-side Firestore write for real-time propagation
+  const path = 'products';
+  try {
+    await setDoc(doc(db, path, cleanProduct.id), cleanProduct);
+  } catch (error: any) {
+    if (!savedOnServer) {
+      throw new Error('خطا در ذخیره محصول در پایگاه داده: ' + (error?.message || error));
+    }
+  }
+
+  // Update local cache upon verified save
   const current = getLocalProducts();
   const index = current.findIndex(p => p.id === cleanProduct.id);
   let updated: Product[];
@@ -225,50 +296,43 @@ export async function saveProduct(product: Product): Promise<void> {
     updated = [cleanProduct, ...current];
   }
   saveLocalProducts(updated);
-
-  // 1. Server-side authoritative write with admin auth
-  try {
-    await fetch('/api/admin/products/save', {
-      method: 'POST',
-      headers: getAdminAuthHeaders(),
-      body: JSON.stringify(cleanProduct),
-    });
-  } catch (err) {
-    console.warn('Server product save notice:', err);
-  }
-
-  // 2. Direct client-side Firestore write for real-time propagation
-  const path = 'products';
-  try {
-    await setDoc(doc(db, path, cleanProduct.id), cleanProduct);
-  } catch (error) {
-    console.warn('Firestore direct write notice:', error);
-  }
 }
 
 export async function deleteProduct(productId: string): Promise<void> {
-  // Update local
-  const current = getLocalProducts();
-  saveLocalProducts(current.filter(p => p.id !== productId));
+  let deletedOnServer = false;
 
   // 1. Server-side delete with admin auth
   try {
-    await fetch('/api/admin/products/delete', {
+    const res = await fetch('/api/admin/products/delete', {
       method: 'POST',
       headers: getAdminAuthHeaders(),
       body: JSON.stringify({ productId }),
     });
-  } catch (err) {
-    console.warn('Server product delete notice:', err);
+    if (res.ok) {
+      deletedOnServer = true;
+    } else {
+      const errData = await res.json().catch(() => null);
+      if (errData?.error) throw new Error(errData.error);
+    }
+  } catch (err: any) {
+    if (err.message && !err.message.includes('Failed to fetch')) {
+      throw err;
+    }
   }
 
   // 2. Direct Firestore delete
   const path = 'products';
   try {
     await deleteDoc(doc(db, path, productId));
-  } catch (error) {
-    console.warn('Firestore delete warning:', error);
+  } catch (error: any) {
+    if (!deletedOnServer) {
+      throw new Error('خطا در حذف محصول از پایگاه داده: ' + (error?.message || error));
+    }
   }
+
+  // Update local
+  const current = getLocalProducts();
+  saveLocalProducts(current.filter(p => p.id !== productId));
 }
 
 // Clear all products (wiping demo catalog in 1 click)
@@ -406,65 +470,26 @@ export function getMyPlacedOrders(): Order[] {
   }
 }
 
-// Create new customer order with server-authoritative validation & stock decrement
-export async function createOrder(order: Order, settings: StoreSettings): Promise<Order> {
-  // 1. First attempt trusted server-side creation & price verification
-  try {
-    const res = await fetch('/api/orders/create', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(order),
-    });
+// Create new customer order with server-authoritative atomic transaction & stock validation
+export async function createOrder(order: Order, _settings: StoreSettings): Promise<Order> {
+  const res = await fetch('/api/orders/create', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(order),
+  });
 
-    if (res.ok) {
-      const data = await res.json();
-      if (data?.success && data?.order) {
-        saveMyPlacedOrder(data.order);
-        return data.order as Order;
-      }
-    } else {
-      const errorData = await res.json().catch(() => null);
-      if (errorData?.error) {
-        throw new Error(errorData.error);
-      }
-    }
-  } catch (serverErr: any) {
-    // If the server explicitly rejected the order (e.g. out of stock), throw to notify customer
-    if (serverErr.message && !serverErr.message.includes('Failed to fetch') && !serverErr.message.includes('NetworkError')) {
-      throw serverErr;
-    }
-    console.warn('Backend /api/orders/create unavailable, falling back to direct Firestore write:', serverErr);
+  if (!res.ok) {
+    const errorData = await res.json().catch(() => null);
+    throw new Error(errorData?.error || 'خطا در ثبت تراکنشی سفارش و بررسی موجودی در پایگاه داده.');
   }
 
-  // 2. Direct Firestore fallback (authorized by isValidOrderCreate rule)
-  const path = 'orders';
-  try {
-    await setDoc(doc(db, path, order.id), order);
-    saveMyPlacedOrder(order);
-  } catch (error) {
-    console.warn('Direct Firestore order write notice:', error);
-    saveMyPlacedOrder(order);
+  const data = await res.json();
+  if (!data?.success || !data?.order) {
+    throw new Error(data?.error || 'پاسخ نامعتبر از سرور پردازش سفارش.');
   }
 
-  // Send privacy-preserving instant ntfy push notification to store owner!
-  // (Customer phone and full street address are never sent to third-party public notification servers)
-  try {
-    const maskedName = order.customerName.length > 3
-      ? `${order.customerName.slice(0, 3)}***`
-      : order.customerName;
-
-    await sendNtfyNotification({
-      topic: settings.ntfyTopic || 'nama_store_orders_1383',
-      title: `🌿 سفارش جدید در ناما (${order.id})`,
-      message: `سفارش جدید ${order.id} به مبلغ ${order.totalAmount.toLocaleString('fa-IR')} تومان ثبت شد.\nنام: ${maskedName}\nشهر: ${order.city}\n(جزئیات کامل، شماره تماس و آدرس فقط در پنل امن مدیریت ثبت گردید)`,
-      tags: ['shopping_cart', 'package', 'dollar'],
-      priority: 4,
-    });
-  } catch (e) {
-    console.error('ntfy notification error:', e);
-  }
-
-  return order;
+  saveMyPlacedOrder(data.order);
+  return data.order as Order;
 }
 
 // Update order status or postal tracking
@@ -639,12 +664,14 @@ export function subscribeToOrders(callback: (orders: Order[]) => void): () => vo
 export function subscribeToSettings(callback: (settings: StoreSettings) => void): () => void {
   const path = 'settings';
   return onSnapshot(
-    doc(db, path, 'main'),
+    doc(db, path, 'public'),
     (docSnap) => {
       if (docSnap.exists()) {
-        const data = docSnap.data() as StoreSettings;
-        saveLocalSettings(data);
-        callback(data);
+        const data = docSnap.data() as Partial<StoreSettings>;
+        const current = getLocalSettings();
+        const merged = { ...current, ...data };
+        saveLocalSettings(merged);
+        callback(merged);
       }
     },
     (error) => {

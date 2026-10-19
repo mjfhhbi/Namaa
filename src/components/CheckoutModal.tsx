@@ -95,8 +95,8 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
   const [step1Errors, setStep1Errors] = useState<Record<string, string>>({});
   const [attemptedStep1, setAttemptedStep1] = useState(false);
 
-  // Step 2: Payment & Receipt Info
-  const [paymentMethodChoice, setPaymentMethodChoice] = useState<'zarinpal' | 'card_to_card'>('zarinpal');
+  // Step 2: Payment & Receipt Info (defaults to official card_to_card bank transfer)
+  const [paymentMethodChoice, setPaymentMethodChoice] = useState<'zarinpal' | 'card_to_card'>('card_to_card');
   const [cardLast4, setCardLast4] = useState('');
   const [paymentReference, setPaymentReference] = useState('');
   const [receiptImage, setReceiptImage] = useState<string>('');
@@ -104,6 +104,16 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [createdOrder, setCreatedOrder] = useState<Order | null>(null);
+
+  // Bank Info loaded securely upon entering Step 2
+  const [bankInfo, setBankInfo] = useState<{
+    bankName: string;
+    cardNumber: string;
+    cardHolder: string;
+    shabaNumber: string;
+  } | null>(null);
+  const [isLoadingBankInfo, setIsLoadingBankInfo] = useState(false);
+  const [bankInfoError, setBankInfoError] = useState<string | null>(null);
 
   // Discount code state
   const [couponCode, setCouponCode] = useState('');
@@ -231,9 +241,35 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
     return Object.keys(errs).length === 0;
   };
 
+  const fetchBankInfo = async (phoneToUse?: string) => {
+    setIsLoadingBankInfo(true);
+    setBankInfoError(null);
+    try {
+      const res = await fetch('/api/checkout/payment-info', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ customerPhone: phoneToUse || cleanPhone }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data?.bankInfo) {
+          setBankInfo(data.bankInfo);
+          return;
+        }
+      }
+      const err = await res.json().catch(() => null);
+      setBankInfoError(err?.error || 'خطا در دریافت اطلاعات حساب بانکی');
+    } catch {
+      setBankInfoError('خطا در برقراری ارتباط با سرور جهت دریافت اطلاعات کارت');
+    } finally {
+      setIsLoadingBankInfo(false);
+    }
+  };
+
   const handleProceedToStep2 = () => {
     if (validateStep1()) {
       setStep(2);
+      fetchBankInfo(cleanPhone);
       // Smooth scroll to top
       const modalBody = document.getElementById('checkout-modal-body');
       if (modalBody) modalBody.scrollTop = 0;
@@ -279,7 +315,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
       totalAmount,
       discountCode: appliedCoupon?.code || undefined,
       discountAmount: discountAmount > 0 ? discountAmount : undefined,
-      status: chosenMethod === 'zarinpal' ? 'processing' : 'paid_pending_approval',
+      status: chosenMethod === 'card_to_card' ? 'paid_pending_approval' : 'pending_receipt',
       paymentMethod: chosenMethod,
       zarinpalAuthority: chosenMethod === 'zarinpal' ? `ZP-${Math.floor(10000000 + Math.random() * 90000000)}` : undefined,
       cardLast4: chosenMethod === 'card_to_card' ? (toEnglishDigits(cardLast4).replace(/\D/g, '').slice(0, 4) || undefined) : undefined,
@@ -820,65 +856,95 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
               {paymentMethodChoice === 'card_to_card' && (
                 <>
                   {/* Bank Card Presentation Card */}
-                  <div className="relative rounded-3xl p-5 sm:p-6 bg-gradient-to-br from-[#163826] via-[#102B1D] to-[#0A1D13] text-white shadow-xl overflow-hidden">
-                    <div className="absolute top-0 right-0 w-48 h-48 bg-white/5 rounded-full blur-2xl pointer-events-none" />
-                    <div className="absolute bottom-0 left-0 w-40 h-40 bg-[#D4A340]/20 rounded-full blur-xl pointer-events-none" />
+                  {(() => {
+                    const activeBank = bankInfo?.bankName || settings.bankName || 'بانک ملی ایران';
+                    const activeCard = bankInfo?.cardNumber || settings.cardNumber;
+                    const activeHolder = bankInfo?.cardHolder || settings.cardHolder || 'متین جهانبانی (ناما فود)';
+                    const activeShaba = bankInfo?.shabaNumber || settings.shabaNumber;
 
-                <div className="flex items-center justify-between mb-4">
-                  <span className="text-xs font-semibold text-emerald-200">
-                    {settings.bankName}
-                  </span>
-                  <span className="px-2.5 py-1 rounded-full bg-white/10 text-amber-300 text-[11px] font-bold">
-                    حساب رسمی فروشگاه ناما
-                  </span>
-                </div>
+                    return (
+                      <div className="relative rounded-3xl p-5 sm:p-6 bg-gradient-to-br from-[#163826] via-[#102B1D] to-[#0A1D13] text-white shadow-xl overflow-hidden">
+                        <div className="absolute top-0 right-0 w-48 h-48 bg-white/5 rounded-full blur-2xl pointer-events-none" />
+                        <div className="absolute bottom-0 left-0 w-40 h-40 bg-[#D4A340]/20 rounded-full blur-xl pointer-events-none" />
 
-                {/* Card Number display */}
-                <div className="my-4 text-center">
-                  <div className="text-[11px] text-gray-300 mb-1">شماره کارت جهت واریز وجه:</div>
-                  <div className="flex items-center justify-center gap-3">
-                    <span dir="ltr" className="text-xl sm:text-2xl font-mono font-black tracking-wider text-amber-200">
-                      {settings.cardNumber}
-                    </span>
-                    <button
-                      onClick={() => copyToClipboard(settings.cardNumber.replace(/\s|-/g, ''), 'card')}
-                      className="p-1.5 rounded-lg bg-white/15 hover:bg-white/25 text-white transition-all flex items-center gap-1 text-xs"
-                      title="کپی شماره کارت"
-                    >
-                      {copiedField === 'card' ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4" />}
-                      <span className="text-[10px]">{copiedField === 'card' ? 'کپی شد' : 'کپی'}</span>
-                    </button>
-                  </div>
-                </div>
+                        <div className="flex items-center justify-between mb-4">
+                          <span className="text-xs font-semibold text-emerald-200">
+                            {activeBank}
+                          </span>
+                          <span className="px-2.5 py-1 rounded-full bg-white/10 text-amber-300 text-[11px] font-bold">
+                            حساب رسمی فروشگاه ناما
+                          </span>
+                        </div>
 
-                {/* Card Details Grid */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-3 border-t border-white/10 text-xs">
-                  <div>
-                    <span className="text-gray-400 block text-[11px]">به نام:</span>
-                    <span className="font-bold text-white">{settings.cardHolder}</span>
-                  </div>
-                  <div className="sm:text-left">
-                    <span className="text-gray-400 block text-[11px]">مبلغ دقیق قابل واریز:</span>
-                    <span className="font-black text-amber-300 text-sm">
-                      {totalAmount.toLocaleString('fa-IR')} تومان
-                    </span>
-                  </div>
-                </div>
+                        {/* Card Number display */}
+                        <div className="my-4 text-center">
+                          <div className="text-[11px] text-gray-300 mb-1">شماره کارت جهت واریز وجه:</div>
+                          {isLoadingBankInfo ? (
+                            <div className="py-2 text-sm text-amber-200 animate-pulse font-medium">
+                              در حال دریافت اطلاعات امن حساب بانکی...
+                            </div>
+                          ) : activeCard ? (
+                            <div className="flex items-center justify-center gap-3">
+                              <span dir="ltr" className="text-xl sm:text-2xl font-mono font-black tracking-wider text-amber-200">
+                                {activeCard}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => copyToClipboard(activeCard.replace(/\s|-/g, ''), 'card')}
+                                className="p-1.5 rounded-lg bg-white/15 hover:bg-white/25 text-white transition-all flex items-center gap-1 text-xs"
+                                title="کپی شماره کارت"
+                              >
+                                {copiedField === 'card' ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4" />}
+                                <span className="text-[10px]">{copiedField === 'card' ? 'کپی شد' : 'کپی'}</span>
+                              </button>
+                            </div>
+                          ) : (
+                            <div className="py-1">
+                              <span className="text-xs text-rose-300">
+                                {bankInfoError || 'اطلاعات کارت دریافت نشد.'}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => fetchBankInfo(cleanPhone)}
+                                className="mr-2 text-xs text-amber-300 underline"
+                              >
+                                تلاش مجدد
+                              </button>
+                            </div>
+                          )}
+                        </div>
 
-                {/* Shaba Number (Optional copy) */}
-                {settings.shabaNumber && (
-                  <div className="mt-3 pt-2 border-t border-white/5 flex items-center justify-between text-[11px] text-gray-300">
-                    <span className="truncate">شبا: <span dir="ltr" className="font-mono text-gray-200">{settings.shabaNumber}</span></span>
-                    <button
-                      onClick={() => copyToClipboard(settings.shabaNumber, 'shaba')}
-                      className="text-amber-300 hover:underline flex items-center gap-1 flex-shrink-0 mr-2"
-                    >
-                      <Copy className="w-3 h-3" />
-                      <span>کپی شبا</span>
-                    </button>
-                  </div>
-                )}
-              </div>
+                        {/* Card Details Grid */}
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-3 border-t border-white/10 text-xs">
+                          <div>
+                            <span className="text-gray-400 block text-[11px]">به نام:</span>
+                            <span className="font-bold text-white">{activeHolder}</span>
+                          </div>
+                          <div className="sm:text-left">
+                            <span className="text-gray-400 block text-[11px]">مبلغ دقیق قابل واریز:</span>
+                            <span className="font-black text-amber-300 text-sm">
+                              {totalAmount.toLocaleString('fa-IR')} تومان
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Shaba Number (Optional copy) */}
+                        {activeShaba && (
+                          <div className="mt-3 pt-2 border-t border-white/5 flex items-center justify-between text-[11px] text-gray-300">
+                            <span className="truncate">شبا: <span dir="ltr" className="font-mono text-gray-200">{activeShaba}</span></span>
+                            <button
+                              type="button"
+                              onClick={() => copyToClipboard(activeShaba, 'shaba')}
+                              className="text-amber-300 hover:underline flex items-center gap-1 flex-shrink-0 mr-2"
+                            >
+                              <Copy className="w-3 h-3" />
+                              <span>کپی شبا</span>
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
 
               {/* Payment Details Input Form */}
               <div className="bg-white p-4 sm:p-5 rounded-2xl border border-[#E7DDC9] space-y-4">
