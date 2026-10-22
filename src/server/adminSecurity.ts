@@ -83,7 +83,7 @@ export function initAdminSecurity() {
 
   const envPin = process.env.ADMIN_PIN?.trim();
   if (envPin) {
-    if (envPin.length >= 6) {
+    if (envPin.length >= 4) {
       const salt = crypto.randomBytes(32).toString('hex');
       state.pinSalt = salt;
       state.pinHash = hashPin(envPin, salt);
@@ -91,7 +91,7 @@ export function initAdminSecurity() {
       saveSecurityFile();
       console.log('[Security] Admin PIN successfully initialized from environment variable.');
     } else {
-      console.warn('[Security] ADMIN_PIN environment variable is too short (minimum 6 characters required).');
+      console.warn('[Security] ADMIN_PIN environment variable is too short (minimum 4 characters required).');
     }
   } else if (state.pinHash) {
     console.log('[Security] Admin PIN loaded from secure persistent storage.');
@@ -126,8 +126,8 @@ export function verifyAdminPin(pin: string, clientIp: string): { success: boolea
     };
   }
 
-  if (!pin || typeof pin !== 'string') {
-    return { success: false, status: 400, error: 'رمز عبور مدیریت الزامی است.' };
+  if (!pin || typeof pin !== 'string' || pin.trim().length > 32) {
+    return { success: false, status: 400, error: 'رمز عبور مدیریت الزامی و حداکثر ۳۲ کاراکتر است.' };
   }
 
   const computedHash = hashPin(pin, state.pinSalt!);
@@ -207,8 +207,8 @@ export function changeAdminPin(
   newPin: string, 
   isVerifiedOwnerByGoogle: boolean
 ): { success: boolean; token?: string; error?: string; status: number } {
-  if (!newPin || typeof newPin !== 'string' || newPin.trim().length < 6) {
-    return { success: false, status: 400, error: 'رمز عبور جدید باید حداقل ۶ کاراکتر باشد.' };
+  if (!newPin || typeof newPin !== 'string' || newPin.trim().length < 4 || newPin.trim().length > 32) {
+    return { success: false, status: 400, error: 'رمز عبور جدید باید بین ۴ تا ۳۲ کاراکتر باشد.' };
   }
 
   // If already configured and not overridden by verified Google owner, check current pin

@@ -373,6 +373,25 @@ export async function resetSampleProducts(): Promise<Product[]> {
 
 // Fetch Orders (strictly restricted to Admin)
 export async function fetchOrders(): Promise<Order[]> {
+  const authHeaders = getAdminAuthHeaders();
+  // 1. If admin is authenticated, attempt server-side fetch with requireAdminAuth
+  if (authHeaders['x-admin-token'] || authHeaders['Authorization']) {
+    try {
+      const res = await fetch('/api/admin/orders', {
+        headers: authHeaders,
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data?.success && Array.isArray(data.orders)) {
+          return data.orders;
+        }
+      }
+    } catch (e) {
+      console.warn('Server admin orders fetch notice:', e);
+    }
+  }
+
+  // 2. Direct Firestore fetch (will succeed if user is verified owner/admin, or safely fail per rules)
   const path = 'orders';
   try {
     const querySnapshot = await getDocs(collection(db, path));
@@ -397,27 +416,58 @@ export async function fetchOrders(): Promise<Order[]> {
 
 // Delete an order permanently (Admin only)
 export async function deleteOrder(orderId: string): Promise<void> {
-  // Server-side delete with admin auth
-  fetch('/api/admin/orders/delete', {
-    method: 'POST',
-    headers: getAdminAuthHeaders(),
-    body: JSON.stringify({ orderId }),
-  }).catch(() => {});
+  let serverDeleted = false;
 
+  // 1. Server-side delete with admin auth
+  try {
+    const res = await fetch('/api/admin/orders/delete', {
+      method: 'POST',
+      headers: getAdminAuthHeaders(),
+      body: JSON.stringify({ orderId }),
+    });
+    if (res.ok) {
+      serverDeleted = true;
+    } else {
+      const errData = await res.json().catch(() => null);
+      if (errData?.error) throw new Error(errData.error);
+    }
+  } catch (err: any) {
+    if (err.message && !err.message.includes('Failed to fetch')) {
+      throw err;
+    }
+  }
+
+  // 2. Direct Firestore delete
   const path = 'orders';
   try {
     await deleteDoc(doc(db, path, orderId));
-  } catch (error) {
-    console.warn('Firestore delete order notice:', error);
+  } catch (error: any) {
+    if (!serverDeleted) {
+      throw new Error('خطا در حذف سفارش از پایگاه داده: ' + (error?.message || error));
+    }
   }
 }
 
 // Clear all orders (Admin only)
 export async function clearAllOrders(): Promise<void> {
-  fetch('/api/admin/orders/clear', {
-    method: 'POST',
-    headers: getAdminAuthHeaders()
-  }).catch(() => {});
+  let serverCleared = false;
+
+  try {
+    const res = await fetch('/api/admin/orders/clear', {
+      method: 'POST',
+      headers: getAdminAuthHeaders()
+    });
+    if (res.ok) {
+      serverCleared = true;
+    } else {
+      const errData = await res.json().catch(() => null);
+      if (errData?.error) throw new Error(errData.error);
+    }
+  } catch (err: any) {
+    if (err.message && !err.message.includes('Failed to fetch')) {
+      throw err;
+    }
+  }
 
   const path = 'orders';
   try {
@@ -425,8 +475,10 @@ export async function clearAllOrders(): Promise<void> {
     for (const d of snap.docs) {
       await deleteDoc(doc(db, path, d.id)).catch(() => {});
     }
-  } catch (error) {
-    console.warn('Notice while clearing orders:', error);
+  } catch (error: any) {
+    if (!serverCleared) {
+      throw new Error('خطا در پاک‌سازی سفارشات: ' + (error?.message || error));
+    }
   }
 }
 
@@ -492,18 +544,58 @@ export async function createOrder(order: Order, _settings: StoreSettings): Promi
   return data.order as Order;
 }
 
+// Submit payment receipt by customer for an existing order
+export async function uploadOrderReceipt(
+  orderId: string,
+  phone: string,
+  receiptImage: string,
+  cardLast4?: string,
+  paymentReference?: string
+): Promise<void> {
+  const res = await fetch('/api/orders/upload-receipt', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      orderId,
+      phone,
+      receiptImage,
+      cardLast4,
+      paymentReference
+    })
+  });
+
+  if (!res.ok) {
+    const errData = await res.json().catch(() => null);
+    throw new Error(errData?.error || 'خطا در ثبت فیش واریزی در سرور.');
+  }
+}
+
 // Update order status or postal tracking
 export async function updateOrderStatus(
   orderId: string, 
   status: OrderStatus, 
   extras?: { trackingCode?: string; receiptImage?: string; notes?: string; cardLast4?: string; paymentReference?: string }
 ): Promise<void> {
+  let serverUpdated = false;
+
   // 1. Server-side update with admin auth
-  fetch('/api/admin/orders/update', {
-    method: 'POST',
-    headers: getAdminAuthHeaders(),
-    body: JSON.stringify({ orderId, status, trackingCode: extras?.trackingCode }),
-  }).catch(() => {});
+  try {
+    const res = await fetch('/api/admin/orders/update', {
+      method: 'POST',
+      headers: getAdminAuthHeaders(),
+      body: JSON.stringify({ orderId, status, trackingCode: extras?.trackingCode }),
+    });
+    if (res.ok) {
+      serverUpdated = true;
+    } else {
+      const errData = await res.json().catch(() => null);
+      if (errData?.error) throw new Error(errData.error);
+    }
+  } catch (err: any) {
+    if (err.message && !err.message.includes('Failed to fetch')) {
+      throw err;
+    }
+  }
 
   // 2. Direct Firestore update
   const path = 'orders';
@@ -513,8 +605,10 @@ export async function updateOrderStatus(
       ...extras,
       updatedAt: new Date().toISOString()
     });
-  } catch (error) {
-    console.warn('Firestore update order notice:', error);
+  } catch (error: any) {
+    if (!serverUpdated) {
+      throw new Error('خطا در بروزرسانی وضعیت سفارش در پایگاه داده: ' + (error?.message || error));
+    }
   }
 }
 

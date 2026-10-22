@@ -198,69 +198,109 @@ export default function App() {
     status: OrderStatus, 
     extras?: { trackingCode?: string }
   ) => {
-    await updateOrderStatus(orderId, status, extras);
-    setOrders(prev => 
-      prev.map(o => o.id === orderId ? { ...o, status, ...extras, updatedAt: new Date().toISOString() } : o)
-    );
-    showToast('وضعیت سفارش بروزرسانی شد.');
+    try {
+      await updateOrderStatus(orderId, status, extras);
+      setOrders(prev => 
+        prev.map(o => o.id === orderId ? { ...o, status, ...extras, updatedAt: new Date().toISOString() } : o)
+      );
+      showToast('وضعیت سفارش بروزرسانی شد.');
+    } catch (err: any) {
+      showToast('خطا در بروزرسانی وضعیت سفارش: ' + (err?.message || 'مشکل در پایگاه داده'));
+      throw err;
+    }
   };
 
   // Admin delete single order
   const handleDeleteOrder = async (orderId: string) => {
-    await deleteOrder(orderId);
-    setOrders(prev => prev.filter(o => o.id !== orderId));
-    showToast('سفارش مورد نظر حذف گردید.');
+    try {
+      await deleteOrder(orderId);
+      setOrders(prev => prev.filter(o => o.id !== orderId));
+      showToast('سفارش مورد نظر حذف گردید.');
+    } catch (err: any) {
+      showToast('خطا در حذف سفارش: ' + (err?.message || 'مشکل در پایگاه داده'));
+      throw err;
+    }
   };
 
   // Admin clear all orders (clean store start)
   const handleClearAllOrders = async () => {
-    await clearAllOrders();
-    setOrders([]);
-    showToast('تمامی سفارشات حذف شدند.');
+    try {
+      await clearAllOrders();
+      setOrders([]);
+      showToast('تمامی سفارشات حذف شدند.');
+    } catch (err: any) {
+      showToast('خطا در پاکسازی سفارشات: ' + (err?.message || 'مشکل در پایگاه داده'));
+      throw err;
+    }
   };
 
   // Admin save/edit product
   const handleSaveProduct = async (product: Product) => {
-    await saveProduct(product);
-    setProducts(prev => {
-      const index = prev.findIndex(p => p.id === product.id);
-      if (index >= 0) {
-        const updated = [...prev];
-        updated[index] = product;
-        return updated;
-      } else {
-        return [product, ...prev];
-      }
-    });
-    showToast('محصول با موفقیت ذخیره شد.');
+    try {
+      await saveProduct(product);
+      setProducts(prev => {
+        const index = prev.findIndex(p => p.id === product.id);
+        if (index >= 0) {
+          const updated = [...prev];
+          updated[index] = product;
+          return updated;
+        } else {
+          return [product, ...prev];
+        }
+      });
+      showToast('محصول با موفقیت ذخیره شد.');
+    } catch (err: any) {
+      showToast('خطا در ذخیره محصول: ' + (err?.message || 'مشکل در پایگاه داده'));
+      throw err;
+    }
   };
 
   // Admin delete product
   const handleDeleteProduct = async (productId: string) => {
-    await deleteProduct(productId);
-    setProducts(prev => prev.filter(p => p.id !== productId));
-    showToast('محصول از کاتالوگ حذف گردید.');
+    try {
+      await deleteProduct(productId);
+      setProducts(prev => prev.filter(p => p.id !== productId));
+      showToast('محصول از کاتالوگ حذف گردید.');
+    } catch (err: any) {
+      showToast('خطا در حذف محصول: ' + (err?.message || 'مشکل در پایگاه داده'));
+      throw err;
+    }
   };
 
   // Admin 1-click Clear all products (wipe demo catalog)
   const handleClearAllProducts = async () => {
-    await clearAllProducts();
-    setProducts([]);
-    showToast('تمامی محصولات از کاتالوگ حذف شدند.');
+    try {
+      await clearAllProducts();
+      setProducts([]);
+      showToast('تمامی محصولات از کاتالوگ حذف شدند.');
+    } catch (err: any) {
+      showToast('خطا در حذف محصولات: ' + (err?.message || 'مشکل در پایگاه داده'));
+      throw err;
+    }
   };
 
   // Admin 1-click Reset Sample products
   const handleResetSampleProducts = async () => {
-    const samples = await resetSampleProducts();
-    setProducts(samples);
-    showToast('محصولات نمونه با موفقیت بازنشانی شدند.');
+    try {
+      const samples = await resetSampleProducts();
+      setProducts(samples);
+      showToast('محصولات نمونه با موفقیت بازنشانی شدند.');
+    } catch (err: any) {
+      showToast('خطا در بازنشانی محصولات نمونه: ' + (err?.message || 'مشکل در پایگاه داده'));
+      throw err;
+    }
   };
 
   // Admin update store settings (all texts & bank info)
   const handleUpdateSettings = async (newSettings: StoreSettings) => {
-    await updateStoreSettings(newSettings);
-    setSettings(newSettings);
-    showToast('تنظیمات و متون سایت ذخیره گردید.');
+    try {
+      await updateStoreSettings(newSettings);
+      setSettings(newSettings);
+      showToast('تنظیمات و متون سایت ذخیره گردید.');
+    } catch (err: any) {
+      showToast('خطا در ذخیره تنظیمات: ' + (err?.message || 'مشکل در پایگاه داده'));
+      throw err;
+    }
   };
 
   // Filtered & Sorted Products

@@ -16,7 +16,7 @@ import {
   Copy,
   Check
 } from 'lucide-react';
-import { searchOrder, updateOrderStatus, getMyPlacedOrders } from '../services/storeService';
+import { searchOrder, uploadOrderReceipt, getMyPlacedOrders } from '../services/storeService';
 import { compressImage } from '../utils/imageCompressor';
 
 interface OrderTrackingModalProps {
@@ -106,6 +106,10 @@ export const OrderTrackingModal: React.FC<OrderTrackingModalProps> = ({
     const file = e.target.files?.[0];
     if (file) {
       setLateError(null);
+      if (!file.type.startsWith('image/')) {
+        setLateError('فرمت فایل نامعتبر است. لطفاً یک تصویر (JPG، PNG، WEBP) انتخاب فرمایید.');
+        return;
+      }
       if (file.size > 8 * 1024 * 1024) {
         setLateError('حجم فایل نباید بیشتر از ۸ مگابایت باشد.');
         return;
@@ -124,16 +128,29 @@ export const OrderTrackingModal: React.FC<OrderTrackingModalProps> = ({
 
   const handleSaveLateReceipt = async () => {
     if (!order) return;
+    const phoneToUse = phone.trim() || order.customerPhone || '';
+    if (!phoneToUse) {
+      setLateError('لطفاً شماره تلفن همراه ۱۱ رقمی ثبت شده در سفارش را وارد فرمایید.');
+      return;
+    }
+    const receiptToUse = lateReceipt || order.receiptImage;
+    if (!receiptToUse) {
+      setLateError('لطفاً ابتدا تصویر فیش واریزی را انتخاب نمایید.');
+      return;
+    }
+
     setIsUpdatingReceipt(true);
     setLateError(null);
     try {
-      await updateOrderStatus(order.id, 'paid_pending_approval', {
-        receiptImage: lateReceipt || order.receiptImage,
-        cardLast4: lateCardLast4.trim() || order.cardLast4,
-      });
+      await uploadOrderReceipt(
+        order.id, 
+        phoneToUse, 
+        receiptToUse, 
+        lateCardLast4.trim() || order.cardLast4
+      );
       const updated: Order = {
         ...order,
-        receiptImage: lateReceipt || order.receiptImage,
+        receiptImage: receiptToUse,
         cardLast4: lateCardLast4.trim() || order.cardLast4,
         status: 'paid_pending_approval',
       };
@@ -142,7 +159,7 @@ export const OrderTrackingModal: React.FC<OrderTrackingModalProps> = ({
       setLateSuccessMessage('اطلاعات پرداخت با موفقیت ثبت شد و برای ادمین ارسال گردید.');
       setTimeout(() => setLateSuccessMessage(null), 5000);
     } catch (e: any) {
-      setLateError('خطا در ثبت اطلاعات.');
+      setLateError(e?.message || 'خطا در ثبت اطلاعات.');
     } finally {
       setIsUpdatingReceipt(false);
     }

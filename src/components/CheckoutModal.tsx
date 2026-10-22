@@ -185,6 +185,10 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
     const file = e.target.files?.[0];
     if (file) {
       setUploadError(null);
+      if (!file.type.startsWith('image/')) {
+        setUploadError('فرمت فایل نامعتبر است. لطفاً یک تصویر (JPG، PNG، WEBP) انتخاب فرمایید.');
+        return;
+      }
       if (file.size > 10 * 1024 * 1024) {
         setUploadError('حجم فایل انتخاب شده نباید بیشتر از ۱۰ مگابایت باشد.');
         return;

@@ -1,0 +1,6 @@
+{
+  "projects": {
+    "default": "demo-nama-test",
+    "test": "demo-nama-test"
+  }
+}

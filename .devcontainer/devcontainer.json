@@ -1,0 +1,11 @@
+{
+  "name": "Namaa Store Sandbox Testing",
+  "image": "mcr.microsoft.com/devcontainers/javascript-node:20-bookworm",
+  "features": {
+    "ghcr.io/devcontainers/features/java:1": {
+      "version": "21",
+      "installJdk": false
+    }
+  },
+  "postCreateCommand": "npm install"
+}

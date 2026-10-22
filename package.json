@@ -9,7 +9,10 @@
     "start": "node dist/server.cjs",
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "test:unit": "tsx test/inMemoryBusinessLogic.test.ts",
+    "test:rules": "tsx test/firestoreRules.test.ts",
+    "test:emulator": "firebase emulators:exec --only firestore,auth --project demo-nama-test \"tsx test/firestoreRules.test.ts\""
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.3.3",
@@ -24,14 +27,17 @@
     "vite": "^8.3.0"
   },
   "devDependencies": {
+    "@firebase/rules-unit-testing": "^6.0.0",
     "@types/canvas-confetti": "^1.9.0",
     "@types/express": "^4.17.21",
     "@types/node": "^22.14.0",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "esbuild": "^0.25.0",
+    "firebase-tools": "^15.34.1",
     "tailwindcss": "^4.3.3",
     "tsx": "^4.21.0",
-    "typescript": "^7.0.2"
+    "typescript": "^7.0.2",
+    "wrangler": "^4.151.3"
   }
 }

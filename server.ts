@@ -26,6 +26,7 @@ import {
   revokeSession
 } from './src/server/adminSecurity';
 import { processOrderCreation } from './src/server/orderManager';
+import { validateTestTargetProject } from './src/server/testEnvironmentGuard';
 
 const app = express();
 // Enable secure reverse proxy support (Cloud Run / Nginx / Docker)
@@ -44,17 +45,62 @@ const adminApp = !getAdminApps().length
   : getAdminApps()[0];
 const adminAuth = getAdminAuth(adminApp);
 
-// Optional: Initialize Admin Firestore if service account key is injected via environment
+// Optional: Initialize Admin Firestore if service account key or local emulator is configured
 let adminDb: any = null;
 try {
-  if (process.env.FIREBASE_SERVICE_ACCOUNT_KEY) {
-    const cred = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_KEY);
-    const saApp = initAdminApp({ credential: cert(cred), projectId: firebaseConfig.projectId }, 'saApp');
-    adminDb = getAdminFirestore(saApp, firebaseConfig.firestoreDatabaseId);
-    console.log('[Auth] Admin Firestore initialized with service account.');
+  if (process.env.FIRESTORE_EMULATOR_HOST) {
+    const emuProjectId = process.env.FIREBASE_PROJECT_ID || 'demo-nama-test';
+    const emuApp = !getAdminApps().some(a => a.name === 'emuApp')
+      ? initAdminApp({ projectId: emuProjectId }, 'emuApp')
+      : getAdminApps().find(a => a.name === 'emuApp')!;
+    adminDb = getAdminFirestore(emuApp);
+    console.log('[Auth] Admin Firestore connected to local emulator:', process.env.FIRESTORE_EMULATOR_HOST);
+  } else {
+    let credRaw: string | undefined = process.env.FIREBASE_SERVICE_ACCOUNT_KEY;
+    if (!credRaw && process.env.FIREBASE_SERVICE_ACCOUNT_PATH) {
+      if (fs.existsSync(process.env.FIREBASE_SERVICE_ACCOUNT_PATH)) {
+        credRaw = fs.readFileSync(process.env.FIREBASE_SERVICE_ACCOUNT_PATH, 'utf8');
+      }
+    }
+
+    if (credRaw) {
+      let cred: any = null;
+      try {
+        cred = JSON.parse(credRaw.trim());
+      } catch {
+        try {
+          const decoded = Buffer.from(credRaw.trim(), 'base64').toString('utf8');
+          cred = JSON.parse(decoded);
+        } catch {}
+      }
+
+      if (cred && cred.client_email && cred.private_key) {
+        const targetProjectId = process.env.FIREBASE_PROJECT_ID || cred.project_id || firebaseConfig.projectId;
+        const targetDatabaseId = process.env.FIRESTORE_DATABASE_ID || (targetProjectId !== firebaseConfig.projectId ? '(default)' : firebaseConfig.firestoreDatabaseId);
+
+        // Safety Barrier: If running under test mode, verify that it does not target production
+        if (process.env.NODE_ENV === 'test' || process.env.RUNNING_TEST === 'true') {
+          validateTestTargetProject({
+            targetProjectId,
+            isCloudTest: process.env.ENABLE_FIREBASE_CLOUD_TEST === 'true',
+            expectedTestProjectId: process.env.EXPECTED_TEST_PROJECT_ID,
+            confirmationFlag: process.env.CONFIRM_NON_PRODUCTION_PROJECT
+          });
+        }
+
+        const saApp = !getAdminApps().some(a => a.name === 'saApp')
+          ? initAdminApp({ credential: cert(cred), projectId: targetProjectId }, 'saApp')
+          : getAdminApps().find(a => a.name === 'saApp')!;
+
+        adminDb = getAdminFirestore(saApp, targetDatabaseId);
+        console.log(`[Auth] Admin Firestore initialized successfully (Project: ${targetProjectId}, Database: ${targetDatabaseId}).`);
+      } else {
+        console.warn('[Auth] Service account credential rejected: missing client_email or private_key fields.');
+      }
+    }
   }
 } catch (e: any) {
-  console.warn('[Auth] Service account key notice:', e.message);
+  console.warn('[Auth] Service account initialization notice:', e.message);
 }
 
 // Middleware
@@ -421,8 +467,8 @@ app.post('/api/orders/track', async (req, res) => {
   try {
     const { orderId, phone } = req.body;
 
-    if (!orderId || typeof orderId !== 'string') {
-      return res.status(400).json({ error: 'شناسه سفارش الزامی است.' });
+    if (!orderId || typeof orderId !== 'string' || orderId.trim().length === 0 || orderId.trim().length > 64) {
+      return res.status(400).json({ error: 'شناسه سفارش الزامی و حداکثر ۶۴ کاراکتر است.' });
     }
 
     const cleanId = orderId.trim().toUpperCase();
@@ -560,8 +606,16 @@ app.post('/api/orders/upload-receipt', async (req, res) => {
   try {
     const { orderId, phone, receiptImage, cardLast4, paymentReference } = req.body;
 
-    if (!orderId || !receiptImage) {
-      return res.status(400).json({ error: 'شناسه سفارش و تصویر فیش الزامی است.' });
+    if (!orderId || !receiptImage || typeof receiptImage !== 'string') {
+      return res.status(400).json({ error: 'شناسه سفارش و تصویر معتبر فیش الزامی است.' });
+    }
+
+    if (!receiptImage.startsWith('data:image/') && !receiptImage.startsWith('https://')) {
+      return res.status(400).json({ error: 'فرمت تصویر فیش نامعتبر است. لطفاً فایل تصویری ارسال نمایید.' });
+    }
+
+    if (receiptImage.length > 7 * 1024 * 1024) {
+      return res.status(400).json({ error: 'حجم تصویر فیش واریز بیش از حد مجاز (حداکثر ۵ مگابایت) است.' });
     }
 
     const cleanId = orderId.trim().toUpperCase();
@@ -606,6 +660,14 @@ app.post('/api/orders/upload-receipt', async (req, res) => {
     rate.failedCount = 0;
     receiptAttempts.set(clientIp, rate);
 
+    // Security check: Customer can only upload receipt if order is awaiting payment/receipt
+    const allowedStatuses = ['pending_receipt', 'paid_pending_approval'];
+    if (!allowedStatuses.includes(orderData.status)) {
+      return res.status(400).json({
+        error: 'امکان ثبت یا تغییر فیش برای این سفارش وجود ندارد؛ سفارش در وضعیت پردازش، ارسال یا خاتمه‌یافته قرار دارد.'
+      });
+    }
+
     orderData.receiptImage = receiptImage;
     if (cardLast4) orderData.cardLast4 = toEnglishDigits(String(cardLast4)).replace(/\D/g, '').slice(0, 4);
     if (paymentReference) orderData.paymentReference = toEnglishDigits(String(paymentReference)).trim();
@@ -613,15 +675,28 @@ app.post('/api/orders/upload-receipt', async (req, res) => {
     orderData.updatedAt = new Date().toISOString();
     persistServerOrder(orderData);
 
-    try {
-      await updateDoc(doc(db, 'orders', cleanId), {
-        receiptImage: orderData.receiptImage,
-        cardLast4: orderData.cardLast4,
-        paymentReference: orderData.paymentReference,
-        status: 'paid_pending_approval',
-        updatedAt: orderData.updatedAt
+    const updatePayload = {
+      receiptImage: orderData.receiptImage,
+      cardLast4: orderData.cardLast4 || null,
+      paymentReference: orderData.paymentReference || null,
+      status: 'paid_pending_approval',
+      updatedAt: orderData.updatedAt
+    };
+
+    if (!adminDb) {
+      return res.status(503).json({
+        error: 'سرویس ثبت فیش در پایگاه داده به دلیل عدم پیکربندی کلید امنیتی سرور (Firebase Admin SDK) موقتاً غیرفعال است.'
       });
-    } catch (_fErr) {}
+    }
+
+    try {
+      await adminDb.collection('orders').doc(cleanId).update(updatePayload);
+    } catch (fErr: any) {
+      console.error('Database receipt update error:', fErr);
+      return res.status(500).json({
+        error: 'خطا در ثبت رسید در پایگاه داده: ' + (fErr.message || 'لطفاً مجدداً تلاش نمایید.')
+      });
+    }
 
     return res.status(200).json({
       success: true,
@@ -704,10 +779,18 @@ app.post('/api/admin/products/save', requireAdminAuth, async (req, res) => {
     if (!product || !product.id || !product.name || product.price === undefined) {
       return res.status(400).json({ error: 'اطلاعات محصول ناقص است.' });
     }
+    const priceNum = Number(product.price);
+    if (isNaN(priceNum) || priceNum < 0) {
+      return res.status(400).json({ error: 'قیمت محصول باید یک عدد نامنفی باشد.' });
+    }
+    const stockNum = Number(product.stock ?? 10);
+    if (isNaN(stockNum) || stockNum < 0 || !Number.isInteger(stockNum)) {
+      return res.status(400).json({ error: 'موجودی انبار باید یک عدد صحیح نامنفی باشد.' });
+    }
     const cleanProduct: Record<string, any> = {
       ...product,
-      price: Number(product.price),
-      stock: Number(product.stock ?? 10),
+      price: priceNum,
+      stock: stockNum,
       updatedAt: new Date().toISOString(),
     };
     if (product.originalPrice && Number(product.originalPrice) > 0) {
@@ -724,13 +807,17 @@ app.post('/api/admin/products/save', requireAdminAuth, async (req, res) => {
       }
     });
 
-    if (adminDb) {
-      try {
-        await adminDb.collection('products').doc(cleanProduct.id).set(cleanProduct);
-      } catch (dbErr: any) {
-        console.error('Database product write error:', dbErr);
-        return res.status(500).json({ error: 'خطا در ذخیره محصول در پایگاه داده: ' + dbErr.message });
-      }
+    if (!adminDb) {
+      return res.status(503).json({
+        error: 'ذخیره محصول در پایگاه داده به دلیل عدم پیکربندی کلید امنیتی سرور (Firebase Admin SDK) امکان‌پذیر نمی‌باشد.'
+      });
+    }
+
+    try {
+      await adminDb.collection('products').doc(cleanProduct.id).set(cleanProduct);
+    } catch (dbErr: any) {
+      console.error('Database product write error:', dbErr);
+      return res.status(500).json({ error: 'خطا در ذخیره محصول در پایگاه داده: ' + dbErr.message });
     }
     return res.status(200).json({ success: true, product: cleanProduct });
   } catch (err: any) {
@@ -746,12 +833,16 @@ app.post('/api/admin/products/delete', requireAdminAuth, async (req, res) => {
     if (!productId) {
       return res.status(400).json({ error: 'شناسه محصول الزامی است.' });
     }
-    if (adminDb) {
-      try {
-        await adminDb.collection('products').doc(productId).delete();
-      } catch (dbErr: any) {
-        return res.status(500).json({ error: 'خطا در حذف محصول از پایگاه داده: ' + dbErr.message });
-      }
+    if (!adminDb) {
+      return res.status(503).json({
+        error: 'حذف محصول از پایگاه داده به دلیل عدم پیکربندی کلید امنیتی سرور (Firebase Admin SDK) امکان‌پذیر نمی‌باشد.'
+      });
+    }
+
+    try {
+      await adminDb.collection('products').doc(productId).delete();
+    } catch (dbErr: any) {
+      return res.status(500).json({ error: 'خطا در حذف محصول از پایگاه داده: ' + dbErr.message });
     }
     return res.status(200).json({ success: true });
   } catch (err: any) {
@@ -763,15 +854,19 @@ app.post('/api/admin/products/delete', requireAdminAuth, async (req, res) => {
 // Clear all products
 app.post('/api/admin/products/clear', requireAdminAuth, async (_req, res) => {
   try {
-    if (adminDb) {
-      try {
-        const snap = await adminDb.collection('products').get();
-        for (const d of snap.docs) {
-          await d.ref.delete();
-        }
-      } catch (dbErr: any) {
-        return res.status(500).json({ error: 'خطا در پاک‌سازی کاتالوگ از پایگاه داده: ' + dbErr.message });
+    if (!adminDb) {
+      return res.status(503).json({
+        error: 'پاک‌سازی کاتالوگ پایگاه داده به دلیل عدم پیکربندی کلید امنیتی سرور (Firebase Admin SDK) امکان‌پذیر نمی‌باشد.'
+      });
+    }
+
+    try {
+      const snap = await adminDb.collection('products').get();
+      for (const d of snap.docs) {
+        await d.ref.delete();
       }
+    } catch (dbErr: any) {
+      return res.status(500).json({ error: 'خطا در پاک‌سازی کاتالوگ از پایگاه داده: ' + dbErr.message });
     }
     return res.status(200).json({ success: true });
   } catch (err: any) {
@@ -833,12 +928,52 @@ app.post('/api/admin/settings/update', requireAdminAuth, async (req, res) => {
   }
 });
 
+// Get all orders (strictly for authenticated admin)
+app.get('/api/admin/orders', requireAdminAuth, async (_req, res) => {
+  try {
+    const ordersMap = new Map<string, any>();
+    serverOrdersCache.forEach((ord, id) => {
+      ordersMap.set(id, ord);
+    });
+
+    if (adminDb) {
+      try {
+        const snap = await adminDb.collection('orders').get();
+        for (const docSnap of snap.docs) {
+          ordersMap.set(docSnap.id, docSnap.data());
+        }
+      } catch (dbErr: any) {
+        console.error('adminDb orders fetch error:', dbErr);
+        return res.status(500).json({ error: 'خطا در دریافت سفارشات از پایگاه داده: ' + dbErr.message });
+      }
+    }
+
+    const ordersList = Array.from(ordersMap.values());
+    ordersList.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+    return res.status(200).json({ success: true, orders: ordersList });
+  } catch (err: any) {
+    return res.status(500).json({ error: 'خطا در دریافت سفارشات: ' + err.message });
+  }
+});
+
 // Update order status & tracking
 app.post('/api/admin/orders/update', requireAdminAuth, async (req, res) => {
   try {
     const { orderId, status, trackingCode } = req.body;
     if (!orderId || !status) {
       return res.status(400).json({ error: 'شناسه سفارش و وضعیت جدید الزامی است.' });
+    }
+    const VALID_ORDER_STATUSES = [
+      'pending_receipt',
+      'paid_pending_approval',
+      'approved',
+      'processing',
+      'shipped',
+      'delivered',
+      'cancelled'
+    ];
+    if (!VALID_ORDER_STATUSES.includes(status)) {
+      return res.status(400).json({ error: 'وضعیت سفارش انتخاب شده نامعتبر است.' });
     }
     const updateData: any = {
       status,

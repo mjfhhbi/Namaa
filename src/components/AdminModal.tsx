@@ -62,14 +62,14 @@ interface AdminModalProps {
   orders: Order[];
   products: Product[];
   settings: StoreSettings;
-  onUpdateOrderStatus: (orderId: string, status: OrderStatus, extras?: { trackingCode?: string }) => void;
-  onDeleteOrder?: (orderId: string) => void;
-  onClearAllOrders?: () => void;
-  onSaveProduct: (product: Product) => void;
-  onDeleteProduct: (productId: string) => void;
-  onClearAllProducts: () => void;
-  onResetSampleProducts?: () => void;
-  onUpdateSettings: (settings: StoreSettings) => void;
+  onUpdateOrderStatus: (orderId: string, status: OrderStatus, extras?: { trackingCode?: string }) => Promise<void> | void;
+  onDeleteOrder?: (orderId: string) => Promise<void> | void;
+  onClearAllOrders?: () => Promise<void> | void;
+  onSaveProduct: (product: Product) => Promise<void> | void;
+  onDeleteProduct: (productId: string) => Promise<void> | void;
+  onClearAllProducts: () => Promise<void> | void;
+  onResetSampleProducts?: () => Promise<void> | void;
+  onUpdateSettings: (settings: StoreSettings) => Promise<void> | void;
 }
 
 export const AdminModal: React.FC<AdminModalProps> = ({
@@ -518,7 +518,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
   };
 
   // Product Submit
-  const handleProductSubmit = (e: React.FormEvent) => {
+  const handleProductSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setProductFormError(null);
     if (!editingProduct?.name || !editingProduct.name.trim()) {
@@ -578,11 +578,15 @@ export const AdminModal: React.FC<AdminModalProps> = ({
       rating: editingProduct.rating ? Number(editingProduct.rating) : 5.0,
       createdAt: editingProduct.createdAt || new Date().toISOString(),
     };
-    onSaveProduct(finalProduct);
-    setEditingProduct(null);
-    setProductFormError(null);
-    setProductSuccessMessage(`محصول «${finalProduct.name}» با موفقیت در کاتالوگ فروشگاه ذخیره گردید.`);
-    setTimeout(() => setProductSuccessMessage(null), 5000);
+    try {
+      await onSaveProduct(finalProduct);
+      setEditingProduct(null);
+      setProductFormError(null);
+      setProductSuccessMessage(`محصول «${finalProduct.name}» با موفقیت در کاتالوگ فروشگاه ذخیره گردید.`);
+      setTimeout(() => setProductSuccessMessage(null), 5000);
+    } catch (err: any) {
+      setProductFormError(err?.message || 'خطا در ذخیره محصول در پایگاه داده.');
+    }
   };
 
   // Duplicate product
