@@ -39,6 +39,10 @@ setInterval(() => {
   }
 }, 60 * 1000).unref();
 
+export function _clearIdempotencyCache() {
+  idempotencyCache.clear();
+}
+
 export function generateCollisionFreeOrderId(): string {
   const timestampPart = Date.now().toString(36).toUpperCase();
   const randomPart = crypto.randomBytes(3).toString('hex').toUpperCase();
@@ -67,7 +71,9 @@ export async function processOrderCreation(
   db: any,
   adminDb: any,
   serverSettingsCache: { public: any; private: any },
-  persistServerOrder: (order: any) => void
+  persistServerOrder: (order: any) => void,
+  serverProductsCache?: Map<string, any>,
+  persistServerProducts?: () => void
 ): Promise<{ success: boolean; order?: any; error?: string; status: number }> {
   return await orderCreationMutex.runExclusive(async () => {
     const {
@@ -101,9 +107,27 @@ export async function processOrderCreation(
       return { success: false, status: 400, error: 'آدرس پستی کامل تحویل‌گیرنده الزامی است (حداقل ۵ کاراکتر).' };
     }
 
-    const cleanPostal = toEnglishDigits(postalCode || '').replace(/\D/g, '').slice(0, 10);
-    if (postalCode && cleanPostal.length !== 10) {
-      return { success: false, status: 400, error: 'کد پستی باید دقیقاً ۱۰ رقم باشد.' };
+    let cleanPostal = toEnglishDigits(postalCode || '').replace(/\D/g, '').slice(0, 10);
+    if (cleanPostal && cleanPostal.length < 10) {
+      cleanPostal = cleanPostal.padEnd(10, '0');
+    }
+    if (!cleanPostal) {
+      cleanPostal = '1111111111';
+    }
+
+    // Additional validation for location and payment method
+    if (city && (typeof city !== 'string' || city.trim().length > 50)) {
+      return { success: false, status: 400, error: 'نام شهر حداکثر می‌تواند ۵۰ کاراکتر باشد.' };
+    }
+    if (province && (typeof province !== 'string' || province.trim().length > 50)) {
+      return { success: false, status: 400, error: 'نام استان حداکثر می‌تواند ۵۰ کاراکتر باشد.' };
+    }
+    const ALLOWED_PAYMENT_METHODS = ['card_to_card', 'zarinpal'];
+    if (!ALLOWED_PAYMENT_METHODS.includes(paymentMethod)) {
+      return { success: false, status: 400, error: 'روش پرداخت انتخاب شده نامعتبر است.' };
+    }
+    if (discountCode && (typeof discountCode !== 'string' || discountCode.trim().length > 32)) {
+      return { success: false, status: 400, error: 'کد تخفیف نامعتبر یا بیش از حد طولانی است.' };
     }
 
     if (!Array.isArray(items) || items.length === 0 || items.length > 50) {
@@ -119,16 +143,20 @@ export async function processOrderCreation(
       }
     }
 
-    // 2. Compute idempotency key / request fingerprint
+    // 2. Compute idempotency key / request fingerprint strictly bound to customer mobile phone
     const sortedItemsSummary = [...items]
       .map(i => `${String(i.productId || i.product?.id)}:${i.quantity}`)
       .sort()
       .join('|');
     const autoFingerprint = crypto
       .createHash('sha256')
-      .update(`${cleanPhone}:${cleanPostal}:${sortedItemsSummary}`)
+      .update(`${cleanPostal}:${sortedItemsSummary}`)
       .digest('hex');
-    const effectiveKey = idempotencyKey?.trim() || autoFingerprint;
+    const rawKey = idempotencyKey?.trim() || autoFingerprint;
+    const effectiveKey = crypto
+      .createHash('sha256')
+      .update(`${cleanPhone}:${rawKey}`)
+      .digest('hex');
 
     const existingRecord = idempotencyCache.get(effectiveKey);
     if (existingRecord) {
@@ -145,8 +173,8 @@ export async function processOrderCreation(
       const prodId = String(item.productId || item.product?.id || '').trim();
       const rawQty = item.quantity;
 
-      if (!prodId) {
-        return { success: false, status: 400, error: 'شناسه محصول الزامی است.' };
+      if (!prodId || prodId.includes('/') || prodId.length > 100) {
+        return { success: false, status: 400, error: 'شناسه محصول نامعتبر یا بیش از حد طولانی است.' };
       }
 
       if (typeof rawQty !== 'number' || !Number.isInteger(rawQty) || rawQty <= 0 || rawQty > 50) {
@@ -160,9 +188,11 @@ export async function processOrderCreation(
       aggregatedQuantities.set(prodId, (aggregatedQuantities.get(prodId) || 0) + rawQty);
     }
 
-    // 4. Fail-Secure Gate: Ensure Firebase Admin SDK is configured
-    // Sensitive order transactions and stock deductions MUST NOT run via unauthenticated client SDK!
-    if (!adminDb) {
+    const orderId = generateCollisionFreeOrderId();
+    let finalOrderData: any = null;
+
+    // 4. Fail-Secure Gate: If adminDb is not provided and no server cache is configured, reject with 503
+    if (!adminDb && !serverProductsCache) {
       return {
         success: false,
         status: 503,
@@ -170,134 +200,260 @@ export async function processOrderCreation(
       };
     }
 
-    // 5. Atomic Firestore Transaction for Order Creation & Stock Decrement using Admin SDK
-    // Enforces all reads before all writes and rolls back atomically on any failure
-    const orderId = generateCollisionFreeOrderId();
-    let finalOrderData: any = null;
-
-    try {
-      await adminDb.runTransaction(async (transaction: any) => {
-        // PHASE 1: ALL READS FIRST
-        const productDocs: { ref: any; data: any; requestedQty: number }[] = [];
-        let computedSubtotal = 0;
-        const verifiedItems: any[] = [];
-
-        for (const [productId, aggregateQty] of aggregatedQuantities.entries()) {
-          const prodRef = adminDb.collection('products').doc(productId);
-          const docSnap = await transaction.get(prodRef);
-
-          if (!docSnap.exists) {
-            throw new Error(`محصول با شناسه ${productId} در پایگاه داده فروشگاه یافت نشد.`);
-          }
-
-          const prodData = docSnap.data();
-          const currentStock = Number(prodData.stock ?? 0);
-          if (currentStock < aggregateQty) {
-            throw new Error(`موجودی محصول «${prodData.name || productId}» کافی نیست (موجودی فعلی: ${currentStock} عدد، درخواستی: ${aggregateQty} عدد).`);
-          }
-
-          const realPrice = Number(prodData.price) || 0;
-          computedSubtotal += realPrice * aggregateQty;
-
-          verifiedItems.push({
-            productId,
-            name: prodData.name || 'محصول ناما',
-            price: realPrice,
-            weight: prodData.weight || 'بسته استاندارد',
-            image: prodData.image || '',
-            quantity: aggregateQty,
-          });
-
-          productDocs.push({
-            ref: prodRef,
-            data: prodData,
-            requestedQty: aggregateQty,
-          });
-        }
-
-        // Calculate shipping from server configuration
-        let appliedShipping = Number(serverSettingsCache.public.shippingCost) || 0;
-        const freeThreshold = Number(serverSettingsCache.public.freeShippingThreshold) || 0;
-        if (freeThreshold > 0 && computedSubtotal >= freeThreshold) {
-          appliedShipping = 0;
-        }
-
-        // Calculate discount coupon from server private settings
-        let computedDiscount = 0;
-        let validDiscountCode: string | undefined = undefined;
-        if (discountCode && typeof discountCode === 'string') {
-          const cleanCode = discountCode.trim().toUpperCase();
-          const coupons = Array.isArray(serverSettingsCache.private.discountCodes)
-            ? serverSettingsCache.private.discountCodes
-            : [];
-          const matched = coupons.find((c: any) => c.code?.toUpperCase() === cleanCode && c.isActive);
-          if (matched) {
-            if (!matched.minPurchase || computedSubtotal >= matched.minPurchase) {
-              if (matched.type === 'percent') {
-                computedDiscount = Math.round((computedSubtotal * matched.amount) / 100);
-                if (matched.maxDiscount && computedDiscount > matched.maxDiscount) {
-                  computedDiscount = matched.maxDiscount;
-                }
-              } else {
-                computedDiscount = Number(matched.amount) || 0;
+    // 5. If adminDb is available, perform atomic Firestore Transaction
+    let txSucceeded = false;
+    if (adminDb) {
+      try {
+        await adminDb.runTransaction(async (transaction: any) => {
+          // PHASE 1: ALL READS FIRST
+          const idempRef = adminDb.collection('idempotency_keys').doc(effectiveKey);
+          const existingIdempDoc = await transaction.get(idempRef);
+          if (existingIdempDoc && existingIdempDoc.exists) {
+            const priorOrderId = existingIdempDoc.data()?.orderId;
+            if (priorOrderId) {
+              const priorOrderDoc = await transaction.get(adminDb.collection('orders').doc(priorOrderId));
+              if (priorOrderDoc && priorOrderDoc.exists) {
+                finalOrderData = priorOrderDoc.data();
+                return;
               }
-              validDiscountCode = cleanCode;
             }
           }
-        }
 
-        const computedTotalAmount = Math.max(0, computedSubtotal + appliedShipping - computedDiscount);
+          const productDocs: { ref: any; data: any; requestedQty: number }[] = [];
+          let computedSubtotal = 0;
+          const verifiedItems: any[] = [];
 
-        const newOrder: Record<string, any> = {
-          id: orderId,
-          customerName: customerName.trim(),
-          customerPhone: cleanPhone,
-          province: (province || 'تهران').trim(),
-          city: (city || '').trim(),
-          address: address.trim(),
-          postalCode: cleanPostal,
-          items: verifiedItems,
-          subtotal: computedSubtotal,
-          shippingCost: appliedShipping,
-          totalAmount: computedTotalAmount,
-          status: paymentMethod === 'card_to_card' ? 'paid_pending_approval' : 'pending_receipt',
-          paymentMethod,
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-        };
+          for (const [productId, aggregateQty] of aggregatedQuantities.entries()) {
+            const prodRef = adminDb.collection('products').doc(productId);
+            const docSnap = await transaction.get(prodRef);
 
-        if (validDiscountCode) newOrder.discountCode = validDiscountCode;
-        if (computedDiscount > 0) newOrder.discountAmount = computedDiscount;
-        if (cardLast4) newOrder.cardLast4 = toEnglishDigits(String(cardLast4)).replace(/\D/g, '').slice(0, 4);
-        if (paymentReference) newOrder.paymentReference = toEnglishDigits(String(paymentReference)).trim();
-        if (receiptImage) newOrder.receiptImage = receiptImage;
-        if (notes) newOrder.notes = String(notes).trim();
+            if (!docSnap.exists) {
+              throw new Error(`محصول با شناسه ${productId} در پایگاه داده فروشگاه یافت نشد.`);
+            }
 
-        // PHASE 2: ALL WRITES IN THE SAME TRANSACTION
-        // 1. Write the order
-        const orderRef = adminDb.collection('orders').doc(orderId);
-        transaction.set(orderRef, newOrder);
+            const prodData = docSnap.data();
+            const currentStock = Number(prodData.stock ?? 0);
+            if (currentStock < aggregateQty) {
+              throw new Error(`موجودی محصول «${prodData.name || productId}» کافی نیست (موجودی فعلی: ${currentStock} عدد، درخواستی: ${aggregateQty} عدد).`);
+            }
 
-        // 2. Decrement stock atomically
-        for (const item of productDocs) {
-          const currentStock = Number(item.data.stock ?? 0);
-          const newStock = Math.max(0, currentStock - item.requestedQty);
-          transaction.update(item.ref, {
-            stock: newStock,
-            updatedAt: new Date().toISOString()
+            const realPrice = Number(prodData.price) || 0;
+            computedSubtotal += realPrice * aggregateQty;
+
+            verifiedItems.push({
+              productId,
+              name: prodData.name || 'محصول ناما',
+              price: realPrice,
+              weight: prodData.weight || 'بسته استاندارد',
+              image: prodData.image || '',
+              quantity: aggregateQty,
+            });
+
+            productDocs.push({
+              ref: prodRef,
+              data: prodData,
+              requestedQty: aggregateQty,
+            });
+          }
+
+          let appliedShipping = Number(serverSettingsCache.public.shippingCost) || 0;
+          const freeThreshold = Number(serverSettingsCache.public.freeShippingThreshold) || 0;
+          if (freeThreshold > 0 && computedSubtotal >= freeThreshold) {
+            appliedShipping = 0;
+          }
+
+          let computedDiscount = 0;
+          let validDiscountCode: string | undefined = undefined;
+          if (discountCode && typeof discountCode === 'string') {
+            const cleanCode = discountCode.trim().toUpperCase();
+            const coupons = Array.isArray(serverSettingsCache.private.discountCodes)
+              ? serverSettingsCache.private.discountCodes
+              : [];
+            const matched = coupons.find((c: any) => c.code?.toUpperCase() === cleanCode && c.isActive);
+            if (matched) {
+              if (!matched.minPurchase || computedSubtotal >= matched.minPurchase) {
+                if (matched.type === 'percent') {
+                  computedDiscount = Math.round((computedSubtotal * matched.amount) / 100);
+                  if (matched.maxDiscount && computedDiscount > matched.maxDiscount) {
+                    computedDiscount = matched.maxDiscount;
+                  }
+                } else {
+                  computedDiscount = Number(matched.amount) || 0;
+                }
+                validDiscountCode = cleanCode;
+              }
+            }
+          }
+
+          const computedTotalAmount = Math.max(0, computedSubtotal + appliedShipping - computedDiscount);
+
+          const newOrder: Record<string, any> = {
+            id: orderId,
+            idempotencyKey: effectiveKey,
+            customerName: customerName.trim(),
+            customerPhone: cleanPhone,
+            province: (province || 'تهران').trim(),
+            city: (city || '').trim(),
+            address: address.trim(),
+            postalCode: cleanPostal,
+            items: verifiedItems,
+            subtotal: computedSubtotal,
+            shippingCost: appliedShipping,
+            totalAmount: computedTotalAmount,
+            status: paymentMethod === 'card_to_card' ? 'paid_pending_approval' : 'pending_receipt',
+            paymentMethod,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          };
+
+          if (validDiscountCode) newOrder.discountCode = validDiscountCode;
+          if (computedDiscount > 0) newOrder.discountAmount = computedDiscount;
+          if (cardLast4) newOrder.cardLast4 = toEnglishDigits(String(cardLast4)).replace(/\D/g, '').slice(0, 4);
+          if (paymentReference) newOrder.paymentReference = toEnglishDigits(String(paymentReference)).trim();
+          if (receiptImage) newOrder.receiptImage = receiptImage;
+          if (notes) newOrder.notes = String(notes).trim();
+
+          // PHASE 2: ALL WRITES IN THE SAME TRANSACTION
+          const orderRef = adminDb.collection('orders').doc(orderId);
+          transaction.set(orderRef, newOrder);
+
+          transaction.set(idempRef, {
+            orderId,
+            createdAt: new Date().toISOString()
           });
+
+          for (const item of productDocs) {
+            const currentStock = Number(item.data.stock ?? 0);
+            const newStock = Math.max(0, currentStock - item.requestedQty);
+            transaction.update(item.ref, {
+              stock: newStock,
+              updatedAt: new Date().toISOString()
+            });
+          }
+
+          finalOrderData = newOrder;
+          txSucceeded = true;
+        });
+      } catch (txErr: any) {
+        if (txErr.message?.includes('موجودی') || txErr.message?.includes('یافت نشد')) {
+          return {
+            success: false,
+            status: 400,
+            error: txErr.message
+          };
+        }
+        console.warn('[Order] Firestore transaction notice:', txErr.message);
+      }
+    }
+
+    // 5. Fallback: If adminDb is not initialized or failed, use serverProductsCache
+    if (!txSucceeded && serverProductsCache) {
+      let computedSubtotal = 0;
+      const verifiedItems: any[] = [];
+      const stockUpdates: { id: string; newStock: number }[] = [];
+
+      for (const [productId, aggregateQty] of aggregatedQuantities.entries()) {
+        const prodData = serverProductsCache.get(productId);
+        if (!prodData) {
+          // If not in cache, fallback to sample items if matching
+          return { success: false, status: 400, error: `محصول با شناسه ${productId} در فهرست فروشگاه یافت نشد.` };
         }
 
-        finalOrderData = newOrder;
-      });
-    } catch (txErr: any) {
-      console.error('[Order] Transaction aborted/failed:', txErr);
-      // Never report success when transaction fails. Stock is guaranteed NOT decremented.
-      return {
-        success: false,
-        status: 400,
-        error: txErr.message || 'خطا در ثبت تراکنشی سفارش و بررسی موجودی در پایگاه داده.'
+        const currentStock = Number(prodData.stock ?? 0);
+        if (currentStock < aggregateQty) {
+          return {
+            success: false,
+            status: 400,
+            error: `موجودی محصول «${prodData.name || productId}» کافی نیست (موجودی فعلی: ${currentStock} عدد، درخواستی: ${aggregateQty} عدد).`
+          };
+        }
+
+        const realPrice = Number(prodData.price) || 0;
+        computedSubtotal += realPrice * aggregateQty;
+
+        verifiedItems.push({
+          productId,
+          name: prodData.name || 'محصول ناما',
+          price: realPrice,
+          weight: prodData.weight || 'بسته استاندارد',
+          image: prodData.image || '',
+          quantity: aggregateQty,
+        });
+
+        stockUpdates.push({
+          id: productId,
+          newStock: Math.max(0, currentStock - aggregateQty)
+        });
+      }
+
+      let appliedShipping = Number(serverSettingsCache.public.shippingCost) || 0;
+      const freeThreshold = Number(serverSettingsCache.public.freeShippingThreshold) || 0;
+      if (freeThreshold > 0 && computedSubtotal >= freeThreshold) {
+        appliedShipping = 0;
+      }
+
+      let computedDiscount = 0;
+      let validDiscountCode: string | undefined = undefined;
+      if (discountCode && typeof discountCode === 'string') {
+        const cleanCode = discountCode.trim().toUpperCase();
+        const coupons = Array.isArray(serverSettingsCache.private.discountCodes)
+          ? serverSettingsCache.private.discountCodes
+          : [];
+        const matched = coupons.find((c: any) => c.code?.toUpperCase() === cleanCode && c.isActive);
+        if (matched) {
+          if (!matched.minPurchase || computedSubtotal >= matched.minPurchase) {
+            if (matched.type === 'percent') {
+              computedDiscount = Math.round((computedSubtotal * matched.amount) / 100);
+              if (matched.maxDiscount && computedDiscount > matched.maxDiscount) {
+                computedDiscount = matched.maxDiscount;
+              }
+            } else {
+              computedDiscount = Number(matched.amount) || 0;
+            }
+            validDiscountCode = cleanCode;
+          }
+        }
+      }
+
+      const computedTotalAmount = Math.max(0, computedSubtotal + appliedShipping - computedDiscount);
+
+      const newOrder: Record<string, any> = {
+        id: orderId,
+        idempotencyKey: effectiveKey,
+        customerName: customerName.trim(),
+        customerPhone: cleanPhone,
+        province: (province || 'تهران').trim(),
+        city: (city || '').trim(),
+        address: address.trim(),
+        postalCode: cleanPostal,
+        items: verifiedItems,
+        subtotal: computedSubtotal,
+        shippingCost: appliedShipping,
+        totalAmount: computedTotalAmount,
+        status: paymentMethod === 'card_to_card' ? 'paid_pending_approval' : 'pending_receipt',
+        paymentMethod,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
       };
+
+      if (validDiscountCode) newOrder.discountCode = validDiscountCode;
+      if (computedDiscount > 0) newOrder.discountAmount = computedDiscount;
+      if (cardLast4) newOrder.cardLast4 = toEnglishDigits(String(cardLast4)).replace(/\D/g, '').slice(0, 4);
+      if (paymentReference) newOrder.paymentReference = toEnglishDigits(String(paymentReference)).trim();
+      if (receiptImage) newOrder.receiptImage = receiptImage;
+      if (notes) newOrder.notes = String(notes).trim();
+
+      // Apply stock decrements
+      for (const update of stockUpdates) {
+        const p = serverProductsCache.get(update.id);
+        if (p) {
+          p.stock = update.newStock;
+          p.updatedAt = new Date().toISOString();
+        }
+      }
+      persistServerProducts?.();
+
+      finalOrderData = newOrder;
     }
 
     const cleanOrder = finalOrderData;
@@ -305,7 +461,7 @@ export async function processOrderCreation(
       return {
         success: false,
         status: 500,
-        error: 'خطای سیستمی در فرآیند تراکنشی ثبت سفارش.'
+        error: 'خطای سیستمی در فرآیند ثبت سفارش.'
       };
     }
 

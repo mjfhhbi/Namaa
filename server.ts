@@ -32,7 +32,7 @@ const app = express();
 // Enable secure reverse proxy support (Cloud Run / Nginx / Docker)
 app.set('trust proxy', 1);
 
-const PORT = Number(process.env.PORT) || 3000;
+const PORT = 3000;
 const HOST = '0.0.0.0';
 
 // Initialize Firebase for server-side trusted validations
@@ -98,6 +98,14 @@ try {
         console.warn('[Auth] Service account credential rejected: missing client_email or private_key fields.');
       }
     }
+  }
+
+  // Attempt standard application default credentials if not already initialized
+  if (!adminDb) {
+    try {
+      adminDb = getAdminFirestore(adminApp, firebaseConfig.firestoreDatabaseId || '(default)');
+      console.log('[Auth] Admin Firestore connected via Application Default Credentials.');
+    } catch (_adcErr) {}
   }
 } catch (e: any) {
   console.warn('[Auth] Service account initialization notice:', e.message);
@@ -210,6 +218,79 @@ function clearServerOrders() {
 }
 
 // -------------------------------------------------------------
+// SERVER-SIDE PRODUCTS PERSISTENCE (Multi-Device Catalog Sync)
+// -------------------------------------------------------------
+const PRODUCTS_STORAGE_FILE = path.join(process.cwd(), 'data', 'server_products.json');
+const serverProductsCache = new Map<string, any>();
+
+function initServerProducts() {
+  try {
+    if (fs.existsSync(PRODUCTS_STORAGE_FILE)) {
+      const raw = fs.readFileSync(PRODUCTS_STORAGE_FILE, 'utf8');
+      const list = JSON.parse(raw);
+      if (Array.isArray(list) && list.length > 0) {
+        for (const item of list) {
+          if (item && item.id) {
+            serverProductsCache.set(item.id, item);
+          }
+        }
+        console.log(`[Products] Loaded ${serverProductsCache.size} products from persistent storage.`);
+        return;
+      }
+    }
+  } catch (err) {
+    console.warn('[Products] Notice loading server products storage:', err);
+  }
+
+  // If cache is empty, add authentic saffron test product
+  if (serverProductsCache.size === 0) {
+    const authenticProduct = {
+      id: 'prod_saffron_super_negin',
+      name: 'زعفران سوپر نگین اعلای قائنات',
+      category: 'saffron',
+      categoryLabel: 'زعفران و زرشک اعلا',
+      price: 495000,
+      originalPrice: 550000,
+      weight: 'یک مثقال (۴.۶ گرم)',
+      description: 'زعفران اصیل و دستچین سوپر نگین قائنات خراسان، بدون هیچ‌گونه خامه و ناخالصی با بالاترین درجه رنگ‌دهی طبیعی، عطر گیرا و تاییدیه آزمایشگاه تخصصی ناما.',
+      shortDesc: 'زعفران اعلای سوپر نگین قائنات با تضمین آزمایشگاهی خلوص و عطر',
+      benefits: [
+        'بالاترین عیار کروسین (قدرت رنگ‌دهی طبیعی)',
+        'دستچین شده از مزارع ممتاز قائنات خراسان',
+        'بسته‌بندی کریستالی پلمپ ضد رطوبت و نور',
+        'تضمین ۱۰۰٪ اصالت و بازگشت وجه بی‌قید و شرط'
+      ],
+      origin: 'خراسان جنوبی، قائنات',
+      stock: 50,
+      image: 'https://images.unsplash.com/photo-1615485500704-8e990f9900f7?auto=format&fit=crop&w=800&q=80',
+      isPopular: true,
+      isOrganic: true,
+      isFeatured: true,
+      isNewArrival: true,
+      badge: 'صادراتی اعلا',
+      rating: 5,
+      harvestYear: '۱۴۰۳',
+      createdAt: '2026-10-24T00:00:00.000Z'
+    };
+    serverProductsCache.set(authenticProduct.id, authenticProduct);
+  }
+
+  persistServerProducts();
+  console.log(`[Products] Initialized product catalog with ${serverProductsCache.size} active products.`);
+}
+initServerProducts();
+
+function persistServerProducts() {
+  try {
+    const dir = path.dirname(PRODUCTS_STORAGE_FILE);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(PRODUCTS_STORAGE_FILE, JSON.stringify(Array.from(serverProductsCache.values()), null, 2), 'utf8');
+  } catch (err) {
+    console.warn('[Products] Notice saving server products:', err);
+  }
+}
+
+// -------------------------------------------------------------
 // SERVER-SIDE STORE SETTINGS (Separation of Public and Private Data)
 // -------------------------------------------------------------
 const SETTINGS_STORAGE_FILE = path.join(process.cwd(), 'data', 'server_settings.json');
@@ -221,43 +302,43 @@ interface ServerSettingsState {
 
 let serverSettingsCache: ServerSettingsState = {
   public: {
-    storeName: 'ناما | NAMA',
-    slogan: 'از نام و جان برای طعمی ماندگار',
-    shippingCost: 0,
+    storeName: 'محصولات غذایی ناما',
+    slogan: 'از نام و جان، برای طعمی ماندگار',
+    shippingCost: 45000,
     freeShippingThreshold: 600000,
-    supportPhone: '09166449409',
-    supportWhatsApp: '09166449409',
-    supportInstagram: 'nama_naturalfood',
-    supportTelegram: 'nama_food_support',
+    supportPhone: '+98 916 644 9409',
+    supportWhatsApp: '+98 916 644 9409',
+    supportInstagram: 'namafoods_',
+    supportTelegram: '',
     supportAddress: '',
-    announcement: '🌿 از نام و جان برای طعمی ماندگار | ضمانت اصالت ۱۰۰٪ طبیعی تمام محصولات با برگه آزمایش معتبر + ارسال رایگان خریدهای بالای ۶۰۰ هزار تومان',
+    announcement: '',
     isStoreOpen: true,
     heroBadge: 'محصولات غذایی ۱۰۰٪ طبیعی، سالم و دستچین ایرانی',
     heroTitle: 'از نام و جان، برای طعمی ماندگار',
-    heroSubtitle: 'سفره‌ای پربرکت با اصیل‌ترین طعم‌های دیار ایران؛ از عسل‌های بکر سبلان و خرمای شکلاتی پیارم تا دوشاب ناب ملایر و زعفران نگین قائنات، بدون مواد افزودنی و با تضمین بازگشت وجه.',
-    heroButtonText: 'مشاهده و خرید محصولات',
+    heroSubtitle: 'سفره‌ای پربرکت با اصیل‌ترین خوراکی‌های سنتی، سالم و سلامت‌محور ایران؛ دستچین‌شده با تعهد به خلوص، کیفیت ممتاز و طعمی ماندگار.',
     promoBadge: 'جشنواره اصالت و سلامت ناما',
     promoTitle: 'از نام و جان، برای طعمی ماندگار',
-    promoSubtitle: 'هر قطره عسل کوهستان و هر دانه خرمای لوکس پیارم در «ناما»، تجلی تعهد به سلامتی و اصالت است. دستچین شده بدون ذره‌ای شکر مصنوعی یا سموم شیمیایی، مستقیم از دستان کشاورزان و زنبورداران امین ایران.',
-    aboutText: 'فروشگاه تخصصی مواد غذایی ارگانیک و سنتی ناما با پایبندی به شعار «از نام و جان برای طعمی ماندگار»، برترین محصولات سالم مزارع، کوهپایه‌ها و نخلستان‌های ایران را مستقیماً به سفره‌های گرم خانواده‌ها می‌رساند.',
+    promoSubtitle: 'تعهد به سلامت و اصالت در «ناما»؛ دستچین شده بدون ذره‌ای شکر مصنوعی یا سموم شیمیایی، مستقیم از دستان کشاورزان و تولیدکنندگان امین ایران.',
+    aboutText: 'فروشگاه تخصصی محصولات طبیعی و سالم ناما با پایبندی به شعار «از نام و جان برای طعمی ماندگار»، باکیفیت‌ترین خوراکی‌های اصیل و سنتی ایران را مستقیماً به سفره‌های پربرکت خانواده‌ها می‌رساند.',
     qualityBadge1: 'برگه آزمایش معتبر',
     qualityBadge2: 'تضمین ۱۰۰٪ اصالت',
     qualityBadge3: 'بسته‌بندی ایمن پستی',
     qualityBadge4: 'ارسال فوری سراسری',
     customCategories: [
-      {
-        id: 'cat_1791989577701',
-        name: 'زعفران',
-        icon: '✨',
-        description: 'عسله لامصب '
-      }
+      { id: 'saffron', name: 'زعفران و زرشک اعلا', icon: '✨', description: 'زعفران سوپر نگین قائنات و زرشک اناری تازه' },
+      { id: 'tea', name: 'چای و دمنوش‌های گیاهی', icon: '🍵', description: 'چای بهاره دستچین و دمنوش‌های میوه‌ای طبیعی' },
+      { id: 'spices', name: 'هل و ادویه‌جات ناب', icon: '🧂', description: 'ادویه‌جات تازه آسیاب‌شده بدون ناخالصی' },
+      { id: 'distillates', name: 'گلاب و عرقیات سنتی', icon: '🌸', description: 'عرقیات دوآتشه و گلاب ناب سنتی' },
+      { id: 'nuts', name: 'خشکبار و آجیل دستچین', icon: '🥜', description: 'پسته، گردو و مغزیجات تازه ایرانی' },
+      { id: 'herbal', name: 'گیاهان دارویی و سلامت', icon: '🌿', description: 'گیاهان دارویی بکر مناطق کوهستانی ایران' },
+      { id: 'other', name: 'سایر محصولات اصیل ناما', icon: '🍯', description: 'سایر خوراکی‌ها و سوغات ممتاز محلی' },
     ]
   },
   private: {
-    cardNumber: '6037-9918-4521-8763',
-    cardHolder: 'متین جهانبانی (ناما فود)',
+    cardNumber: '۶۰۳۷۹۹۸۱۴۵۲۳۸۷۱۶',
+    cardHolder: 'متین جهانبانی',
     bankName: 'بانک ملی ایران',
-    shabaNumber: 'IR320170000000108923456001',
+    shabaNumber: 'IR120170000000109283746501',
     ntfyTopic: 'nama_store_orders_1383',
     discountCodes: []
   }
@@ -276,6 +357,7 @@ function initServerSettings() {
   }
 }
 initServerSettings();
+persistServerSettings();
 
 function persistServerSettings() {
   try {
@@ -303,7 +385,7 @@ const orderTrackingLockouts = new Map<string, { failedCount: number; lockedUntil
  * - Cryptographically verifies token signature via Firebase Admin SDK or validates persistent server session
  * - Rejects with 403 if token is invalid, forged, expired, or non-admin
  */
-export async function requireAdminAuth(req: express.Request, res: express.Response, next: express.NextFunction) {
+async function requireAdminAuth(req: express.Request, res: express.Response, next: express.NextFunction) {
   const authHeader = req.headers.authorization;
   const customHeader = req.headers['x-admin-token'] as string;
 
@@ -410,7 +492,9 @@ app.post('/api/orders/create', async (req, res) => {
       db,
       adminDb,
       serverSettingsCache,
-      persistServerOrder
+      persistServerOrder,
+      serverProductsCache,
+      persistServerProducts
     );
 
     if (!result.success) {
@@ -754,6 +838,18 @@ app.get('/api/settings/public', (_req, res) => {
   });
 });
 
+/**
+ * 6. GET /api/products
+ * Public products catalog: Returns all store products for customer storefront
+ * Backed by authoritative persistent server storage and real-time synced
+ */
+app.get('/api/products', (_req, res) => {
+  return res.status(200).json({
+    success: true,
+    products: Array.from(serverProductsCache.values())
+  });
+});
+
 // -------------------------------------------------------------
 // ADMIN MANAGEMENT ENDPOINTS (Server-Side Verified Operations)
 // ALL PROTECTED WITH requireAdminAuth (401 on missing auth, 403 on invalid auth)
@@ -772,10 +868,11 @@ app.get('/api/admin/settings', requireAdminAuth, async (_req, res) => {
   }
 });
 
-// Save or update product
+// Save or update product (Persisted in server store & synchronized to Firestore)
 app.post('/api/admin/products/save', requireAdminAuth, async (req, res) => {
   try {
-    const product = req.body;
+    const raw = req.body;
+    const product = (raw && typeof raw === 'object' && raw.product) ? raw.product : raw;
     if (!product || !product.id || !product.name || product.price === undefined) {
       return res.status(400).json({ error: 'اطلاعات محصول ناقص است.' });
     }
@@ -807,18 +904,17 @@ app.post('/api/admin/products/save', requireAdminAuth, async (req, res) => {
       }
     });
 
-    if (!adminDb) {
-      return res.status(503).json({
-        error: 'ذخیره محصول در پایگاه داده به دلیل عدم پیکربندی کلید امنیتی سرور (Firebase Admin SDK) امکان‌پذیر نمی‌باشد.'
+    // 1. Authoritative write to persistent server cache (guarantees cross-device availability)
+    serverProductsCache.set(cleanProduct.id, cleanProduct);
+    persistServerProducts();
+
+    // 2. Best-effort write to Firestore Admin if configured
+    if (adminDb) {
+      adminDb.collection('products').doc(cleanProduct.id).set(cleanProduct).catch((dbErr: any) => {
+        console.warn('[Products] Firestore admin sync notice:', dbErr.message);
       });
     }
 
-    try {
-      await adminDb.collection('products').doc(cleanProduct.id).set(cleanProduct);
-    } catch (dbErr: any) {
-      console.error('Database product write error:', dbErr);
-      return res.status(500).json({ error: 'خطا در ذخیره محصول در پایگاه داده: ' + dbErr.message });
-    }
     return res.status(200).json({ success: true, product: cleanProduct });
   } catch (err: any) {
     console.error('Server save product error:', err);
@@ -826,51 +922,65 @@ app.post('/api/admin/products/save', requireAdminAuth, async (req, res) => {
   }
 });
 
-// Delete product
-app.post('/api/admin/products/delete', requireAdminAuth, async (req, res) => {
+// Delete product handler (supports POST, DELETE, and URL params)
+const handleDeleteProductRequest = async (req: express.Request, res: express.Response) => {
   try {
-    const { productId } = req.body;
+    const productId = req.body?.productId || req.body?.id || (req.query?.productId as string) || (req.query?.id as string) || req.params?.id;
     if (!productId) {
       return res.status(400).json({ error: 'شناسه محصول الزامی است.' });
     }
-    if (!adminDb) {
-      return res.status(503).json({
-        error: 'حذف محصول از پایگاه داده به دلیل عدم پیکربندی کلید امنیتی سرور (Firebase Admin SDK) امکان‌پذیر نمی‌باشد.'
+
+    serverProductsCache.delete(productId);
+    persistServerProducts();
+
+    if (adminDb) {
+      adminDb.collection('products').doc(productId).delete().catch((dbErr: any) => {
+        console.warn('[Products] Firestore admin delete notice:', dbErr.message);
       });
     }
 
-    try {
-      await adminDb.collection('products').doc(productId).delete();
-    } catch (dbErr: any) {
-      return res.status(500).json({ error: 'خطا در حذف محصول از پایگاه داده: ' + dbErr.message });
-    }
     return res.status(200).json({ success: true });
   } catch (err: any) {
     console.error('Server delete product error:', err);
     return res.status(500).json({ error: 'خطا در حذف محصول: ' + err.message });
   }
-});
+};
+
+app.post('/api/admin/products/delete', requireAdminAuth, handleDeleteProductRequest);
+app.delete('/api/admin/products/delete', requireAdminAuth, handleDeleteProductRequest);
+app.delete('/api/admin/products/:id', requireAdminAuth, handleDeleteProductRequest);
 
 // Clear all products
 app.post('/api/admin/products/clear', requireAdminAuth, async (_req, res) => {
   try {
-    if (!adminDb) {
-      return res.status(503).json({
-        error: 'پاک‌سازی کاتالوگ پایگاه داده به دلیل عدم پیکربندی کلید امنیتی سرور (Firebase Admin SDK) امکان‌پذیر نمی‌باشد.'
+    serverProductsCache.clear();
+    persistServerProducts();
+
+    if (adminDb) {
+      adminDb.collection('products').get().then((snap: any) => {
+        for (const d of snap.docs) {
+          d.ref.delete().catch(() => {});
+        }
+      }).catch((dbErr: any) => {
+        console.warn('[Products] Firestore admin clear notice:', dbErr.message);
       });
     }
 
-    try {
-      const snap = await adminDb.collection('products').get();
-      for (const d of snap.docs) {
-        await d.ref.delete();
-      }
-    } catch (dbErr: any) {
-      return res.status(500).json({ error: 'خطا در پاک‌سازی کاتالوگ از پایگاه داده: ' + dbErr.message });
-    }
     return res.status(200).json({ success: true });
   } catch (err: any) {
     return res.status(500).json({ error: 'خطا در پاک‌سازی کاتالوگ: ' + err.message });
+  }
+});
+
+// Clear / reset catalog
+app.post('/api/admin/products/reset-samples', requireAdminAuth, async (_req, res) => {
+  try {
+    serverProductsCache.clear();
+    persistServerProducts();
+
+    return res.status(200).json({ success: true, products: [] });
+  } catch (err: any) {
+    return res.status(500).json({ error: 'خطا در بازنشانی کاتالوگ: ' + err.message });
   }
 });
 
@@ -943,8 +1053,7 @@ app.get('/api/admin/orders', requireAdminAuth, async (_req, res) => {
           ordersMap.set(docSnap.id, docSnap.data());
         }
       } catch (dbErr: any) {
-        console.error('adminDb orders fetch error:', dbErr);
-        return res.status(500).json({ error: 'خطا در دریافت سفارشات از پایگاه داده: ' + dbErr.message });
+        console.warn('adminDb orders fetch notice (using persistent store):', dbErr.message);
       }
     }
 
@@ -968,6 +1077,7 @@ app.post('/api/admin/orders/update', requireAdminAuth, async (req, res) => {
       'paid_pending_approval',
       'approved',
       'processing',
+      'packaging',
       'shipped',
       'delivered',
       'cancelled'
@@ -991,7 +1101,7 @@ app.post('/api/admin/orders/update', requireAdminAuth, async (req, res) => {
       try {
         await adminDb.collection('orders').doc(orderId).update(updateData);
       } catch (dbErr: any) {
-        return res.status(500).json({ error: 'خطا در بروزرسانی سفارش در پایگاه داده: ' + dbErr.message });
+        console.warn('adminDb order update notice:', dbErr.message);
       }
     }
     return res.status(200).json({ success: true });
@@ -1012,7 +1122,7 @@ app.post('/api/admin/orders/delete', requireAdminAuth, async (req, res) => {
       try {
         await adminDb.collection('orders').doc(orderId).delete();
       } catch (dbErr: any) {
-        return res.status(500).json({ error: 'خطا در حذف سفارش از پایگاه داده: ' + dbErr.message });
+        console.warn('adminDb order delete notice:', dbErr.message);
       }
     }
     return res.status(200).json({ success: true });
@@ -1033,7 +1143,7 @@ app.post('/api/admin/orders/clear', requireAdminAuth, async (_req, res) => {
           await d.ref.delete();
         }
       } catch (dbErr: any) {
-        return res.status(500).json({ error: 'خطا در پاکسازی سفارشات از پایگاه داده: ' + dbErr.message });
+        console.warn('adminDb clear orders notice:', dbErr.message);
       }
     }
     return res.status(200).json({ success: true });
@@ -1062,7 +1172,7 @@ async function setupServer() {
     try {
       const { createServer: createViteServer } = await import('vite');
       const vite = await createViteServer({
-        server: { middlewareMode: true },
+        server: { middlewareMode: true, hmr: false },
         appType: 'spa',
       });
       app.use(vite.middlewares);

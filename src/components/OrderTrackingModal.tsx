@@ -81,15 +81,40 @@ export const OrderTrackingModal: React.FC<OrderTrackingModalProps> = ({
   if (!isOpen) return null;
 
   const handleSearch = async (orderIdToSearch?: string, phoneToSearch?: string) => {
-    const id = (orderIdToSearch !== undefined ? orderIdToSearch : query).trim();
-    const ph = (phoneToSearch !== undefined ? phoneToSearch : phone).trim();
-    if (!id) return;
+    let rawId = (orderIdToSearch !== undefined ? orderIdToSearch : query).trim();
+    let rawPh = (phoneToSearch !== undefined ? phoneToSearch : phone).trim();
+
+    // Auto-fill from local orders if user only provided one
+    if (rawId && !rawPh) {
+      const recents = getMyPlacedOrders();
+      const match = recents.find(r => r.id.toUpperCase() === rawId.toUpperCase());
+      if (match?.customerPhone) {
+        rawPh = match.customerPhone;
+        setPhone(match.customerPhone);
+      }
+    } else if (!rawId && rawPh) {
+      const recents = getMyPlacedOrders();
+      const match = recents.find(r => r.customerPhone && r.customerPhone.endsWith(rawPh.slice(-7)));
+      if (match?.id) {
+        rawId = match.id;
+        setQuery(match.id);
+      }
+    }
+
+    if (!rawId) {
+      setSearchError('لطفاً کد سفارش خود (مانند NM-8492) را وارد فرمایید.');
+      return;
+    }
+    if (!rawPh) {
+      setSearchError('لطفاً شماره موبایل ۱۱ رقمی ثبت شده در سفارش (مانند ۰۹۱۲۳۴۵۶۷۸۹) را وارد فرمایید.');
+      return;
+    }
 
     setLoading(true);
     setSearched(true);
     setSearchError(null);
     try {
-      const result = await searchOrder(id, ph);
+      const result = await searchOrder(rawId, rawPh);
       setOrder(result);
       if (!result) {
         setSearchError('سفارشی با این مشخصات یافت نشد. لطفاً کد سفارش و شماره همراه را بررسی کنید.');
@@ -183,8 +208,20 @@ export const OrderTrackingModal: React.FC<OrderTrackingModalProps> = ({
 
   const activeStepIdx = order ? getStepIndex(order.status) : 0;
 
+  React.useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, onClose]);
+
   return (
-    <div className="fixed inset-0 z-50 overflow-y-auto bg-black/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-5">
+    <div 
+      className="fixed inset-0 z-50 overflow-y-auto bg-black/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-5"
+      onClick={onClose}
+    >
       <div 
         className="relative w-full max-w-2xl bg-[#FAF8F3] rounded-3xl shadow-2xl border border-[#E4D7C2] overflow-hidden text-right animate-in fade-in zoom-in-95 duration-200"
         onClick={(e) => e.stopPropagation()}
@@ -202,32 +239,100 @@ export const OrderTrackingModal: React.FC<OrderTrackingModalProps> = ({
           </div>
 
           <button
-            onClick={onClose}
-            className="w-8 h-8 rounded-full hover:bg-gray-100 flex items-center justify-center text-gray-500"
+            type="button"
+            onClick={(e) => { e.preventDefault(); e.stopPropagation(); onClose(); }}
+            onTouchEnd={(e) => { e.preventDefault(); e.stopPropagation(); onClose(); }}
+            className="w-10 h-10 rounded-full hover:bg-red-50 hover:text-red-700 active:bg-red-100 flex items-center justify-center text-gray-500 transition-colors cursor-pointer border border-transparent hover:border-red-200"
+            title="بستن"
+            aria-label="بستن"
           >
-            <X className="w-5 h-5" />
+            <X className="w-5 h-5 stroke-[2.5]" />
           </button>
         </div>
 
-        <div className="p-5 sm:p-7 space-y-6 max-h-[80vh] overflow-y-auto">
-          {/* Search Box */}
-          <form onSubmit={(e) => { e.preventDefault(); handleSearch(); }} className="flex gap-2">
-            <input
-              type="text"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="کد پیگیری (مانند NM-7841) یا شماره موبایل..."
-              className="flex-1 bg-white border border-[#D5C6AC] rounded-2xl px-4 py-2.5 text-xs sm:text-sm text-[#163826] focus:outline-none focus:ring-2 focus:ring-[#163826]"
-            />
+        <div className="p-5 sm:p-7 space-y-5 max-h-[80vh] overflow-y-auto">
+          {/* Search Inputs (Dual fields to ensure robust tracking) */}
+          <div className="bg-white p-4 sm:p-5 rounded-3xl border border-[#E7DDC9] shadow-xs space-y-3.5">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="space-y-1 text-right">
+                <label className="text-xs font-bold text-[#2C4030] block">
+                  کد سفارش:
+                </label>
+                <input
+                  type="text"
+                  dir="ltr"
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder="مثال: NM-8492"
+                  className="w-full bg-[#FAF8F3] border border-[#D5C6AC] rounded-2xl px-4 py-2.5 text-xs sm:text-sm text-[#163826] font-mono focus:outline-none focus:ring-2 focus:ring-[#163826]"
+                />
+              </div>
+
+              <div className="space-y-1 text-right">
+                <label className="text-xs font-bold text-[#2C4030] block">
+                  شماره موبایل خریدار:
+                </label>
+                <input
+                  type="tel"
+                  dir="ltr"
+                  value={phone}
+                  onChange={(e) => setPhone(e.target.value)}
+                  placeholder="مثال: ۰۹۱۲۳۴۵۶۷۸۹"
+                  className="w-full bg-[#FAF8F3] border border-[#D5C6AC] rounded-2xl px-4 py-2.5 text-xs sm:text-sm text-[#163826] font-mono focus:outline-none focus:ring-2 focus:ring-[#163826]"
+                />
+              </div>
+            </div>
+
             <button
-              type="submit"
+              type="button"
               disabled={loading}
-              className="px-5 py-2.5 rounded-2xl bg-[#163826] hover:bg-[#0E2619] text-white text-xs sm:text-sm font-bold shadow-md transition-all flex items-center gap-1.5"
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                handleSearch();
+              }}
+              className="w-full py-3 rounded-2xl bg-[#163826] hover:bg-[#0E2619] active:scale-95 text-white text-xs sm:text-sm font-black shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
             >
-              <Search className="w-4 h-4" />
-              <span>استعلام</span>
+              <Search className="w-4 h-4 text-amber-300" />
+              <span>{loading ? 'در حال استعلام از پایگاه داده...' : 'استعلام وضعیت سفارش'}</span>
             </button>
-          </form>
+
+            {searchError && (
+              <div className="p-3 bg-red-50 border border-red-200 text-red-700 text-xs font-bold rounded-2xl flex items-center gap-2 text-right animate-in fade-in">
+                <AlertCircle className="w-4 h-4 text-red-600 shrink-0" />
+                <span>{searchError}</span>
+              </div>
+            )}
+          </div>
+
+          {/* Quick-track for recent orders on this device */}
+          {myRecentOrders.length > 0 && !order && (
+            <div className="space-y-2 pt-1 text-right">
+              <span className="text-xs font-bold text-[#718274] block">
+                سفارش‌های ثبت شده روی این دستگاه:
+              </span>
+              <div className="flex flex-wrap gap-2">
+                {myRecentOrders.map((rec) => (
+                  <button
+                    key={rec.id}
+                    type="button"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      setQuery(rec.id);
+                      setPhone(rec.customerPhone);
+                      handleSearch(rec.id, rec.customerPhone);
+                    }}
+                    className="px-3 py-1.5 rounded-xl bg-white border border-[#D5C6AC] hover:border-[#163826] text-xs font-bold text-[#163826] flex items-center gap-1.5 cursor-pointer shadow-xs active:scale-95 transition-all"
+                  >
+                    <Truck className="w-3.5 h-3.5 text-emerald-600" />
+                    <span className="font-mono">{rec.id}</span>
+                    <span className="text-[10px] text-gray-500">({rec.totalAmount.toLocaleString('fa-IR')} تومان)</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* Results Area */}
           {loading ? (
@@ -337,7 +442,7 @@ export const OrderTrackingModal: React.FC<OrderTrackingModalProps> = ({
               </div>
 
               {/* Late Receipt upload section if no receipt attached */}
-              {!order.receiptImage && order.status === 'paid_pending_approval' && (
+              {!order.receiptImage && (order.status === 'pending_receipt' || order.status === 'paid_pending_approval') && (
                 <div className="bg-amber-50 border border-amber-200 p-4 rounded-2xl space-y-3">
                   <div className="flex items-start gap-2 text-xs text-amber-900 font-bold">
                     <AlertCircle className="w-4 h-4 text-amber-700 flex-shrink-0 mt-0.5" />

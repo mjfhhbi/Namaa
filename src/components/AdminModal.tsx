@@ -50,8 +50,7 @@ import {
   ShieldCheck
 } from 'lucide-react';
 import { sendNtfyNotification, fetchAdminSettings } from '../services/storeService';
-import { DEFAULT_SETTINGS } from '../data/defaultProducts';
-import { PRESET_IMAGE_OPTIONS } from '../data/productImages';
+import { DEFAULT_STORE_SETTINGS as DEFAULT_SETTINGS, PRESET_PRODUCT_IMAGES as PRESET_IMAGE_OPTIONS } from '../types';
 import { compressImage } from '../utils/imageCompressor';
 import { doc, setDoc } from 'firebase/firestore';
 import { db, auth, googleProvider, signInWithPopup, signOut, onAuthStateChanged, User } from '../firebase';
@@ -70,6 +69,7 @@ interface AdminModalProps {
   onClearAllProducts: () => Promise<void> | void;
   onResetSampleProducts?: () => Promise<void> | void;
   onUpdateSettings: (settings: StoreSettings) => Promise<void> | void;
+  onAuthChange?: (isAuthenticated: boolean, email?: string | null) => void;
 }
 
 export const AdminModal: React.FC<AdminModalProps> = ({
@@ -85,81 +85,34 @@ export const AdminModal: React.FC<AdminModalProps> = ({
   onDeleteProduct,
   onClearAllProducts,
   onUpdateSettings,
+  onAuthChange,
 }) => {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [authMethod, setAuthMethod] = useState<'firebase_google' | 'pin' | null>(null);
-  const [currentUser, setCurrentUser] = useState<User | null>(null);
-  const [isLoggingInGoogle, setIsLoggingInGoogle] = useState(false);
-  const [googleLoginError, setGoogleLoginError] = useState<string | null>(null);
   const [passwordInput, setPasswordInput] = useState('');
   const [loginError, setLoginError] = useState(false);
 
-  // Monitor Firebase Auth state
+  // Monitor Admin Session Token (Pure secure PIN, no Google dependency)
   React.useEffect(() => {
-    const unsub = onAuthStateChanged(auth, async (user) => {
-      if (user) {
-        if (user.email === 'matinjahanbani2024@gmail.com') {
-          setCurrentUser(user);
-          setIsAuthenticated(true);
-          setAuthMethod('firebase_google');
-          try {
-            const token = await user.getIdToken();
-            sessionStorage.setItem('nama_admin_token', token);
-          } catch {}
-        } else {
-          await signOut(auth);
-          setIsAuthenticated(false);
-          setCurrentUser(null);
-          setGoogleLoginError('حساب گوگل وارد شده دسترسی مدیریت فروشگاه ناما را ندارد.');
-        }
-      }
-    });
-    return () => unsub();
-  }, []);
-
-  const handleGoogleLogin = async () => {
-    setIsLoggingInGoogle(true);
-    setGoogleLoginError(null);
-    try {
-      const res = await signInWithPopup(auth, googleProvider);
-      if (res.user) {
-        if (res.user.email !== 'matinjahanbani2024@gmail.com') {
-          await signOut(auth);
-          setIsAuthenticated(false);
-          setCurrentUser(null);
-          setGoogleLoginError('حساب گوگل وارد شده دسترسی مدیریت ندارد.');
-          return;
-        }
-        setIsAuthenticated(true);
-        setCurrentUser(res.user);
-        setAuthMethod('firebase_google');
-        setFormSettings({ ...settings });
-        try {
-          const token = await res.user.getIdToken();
-          sessionStorage.setItem('nama_admin_token', token);
-          await setDoc(doc(db, 'admins', res.user.uid), {
-            uid: res.user.uid,
-            email: res.user.email,
-            displayName: res.user.displayName,
-            role: 'admin',
-            lastLogin: new Date().toISOString()
-          }, { merge: true });
-          const fullSettings = await fetchAdminSettings();
-          if (fullSettings) {
-            setFormSettings(fullSettings);
-            onUpdateSettings(fullSettings);
-          }
-        } catch (e) {
-          console.warn('Admin registry notice:', e);
-        }
-      }
-    } catch (err: any) {
-      console.warn('Google sign-in error:', err);
-      setGoogleLoginError(err?.message || 'خطا در احراز هویت با حساب گوگل');
-    } finally {
-      setIsLoggingInGoogle(false);
+    const token = sessionStorage.getItem('nama_admin_token');
+    if (token) {
+      setIsAuthenticated(true);
+      onAuthChange?.(true, 'مدیر سیستم');
+    } else {
+      setIsAuthenticated(false);
+      onAuthChange?.(false, null);
     }
-  };
+  }, [onAuthChange]);
+
+  React.useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, onClose]);
 
   const handleLogout = async () => {
     const token = sessionStorage.getItem('nama_admin_token');
@@ -169,31 +122,30 @@ export const AdminModal: React.FC<AdminModalProps> = ({
         headers: { 'Authorization': `Bearer ${token}` }
       }).catch(() => {});
     }
-    try {
-      await signOut(auth);
-    } catch {}
     sessionStorage.removeItem('nama_admin_token');
     setIsAuthenticated(false);
-    setCurrentUser(null);
-    setAuthMethod(null);
+    onAuthChange?.(false, null);
   };
 
   // Handle PIN Login fallback via Server API
-  const handlePinLogin = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const [isLoggingInPin, setIsLoggingInPin] = useState(false);
+  const handlePinLogin = async (e?: React.FormEvent, customPin?: string) => {
+    if (e) e.preventDefault();
     setLoginError(false);
+    setIsLoggingInPin(true);
+    const pinToTry = (customPin || passwordInput).trim();
     try {
       const res = await fetch('/api/admin/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ pin: passwordInput.trim() }),
+        body: JSON.stringify({ pin: pinToTry }),
       });
       const data = await res.json();
       if (res.ok && data.token) {
         sessionStorage.setItem('nama_admin_token', data.token);
         setIsAuthenticated(true);
-        setAuthMethod('pin');
         setLoginError(false);
+        onAuthChange?.(true, 'مدیر سیستم (با رمز عبور)');
         setFormSettings({ ...settings });
         try {
           const fullSettings = await fetchAdminSettings();
@@ -207,12 +159,14 @@ export const AdminModal: React.FC<AdminModalProps> = ({
       }
     } catch {
       setLoginError(true);
+    } finally {
+      setIsLoggingInPin(false);
     }
   };
 
   // Tabs
   type TabType = 'dashboard' | 'orders' | 'products' | 'categories' | 'discounts' | 'customers' | 'cms' | 'settings';
-  const [activeTab, setActiveTab] = useState<TabType>('dashboard');
+  const [activeTab, setActiveTab] = useState<TabType>('products');
 
   // Orders Management States
   const [orderStatusFilter, setOrderStatusFilter] = useState<'all' | OrderStatus>('all');
@@ -227,6 +181,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
   const [productFormError, setProductFormError] = useState<string | null>(null);
   const [productSuccessMessage, setProductSuccessMessage] = useState<string | null>(null);
   const [isUploadingProductImage, setIsUploadingProductImage] = useState(false);
+  const [isSavingProduct, setIsSavingProduct] = useState(false);
 
   // Category creation & editing states (Full Dynamic Category CRUD)
   const [isAddingNewCatInline, setIsAddingNewCatInline] = useState(false);
@@ -579,13 +534,16 @@ export const AdminModal: React.FC<AdminModalProps> = ({
       createdAt: editingProduct.createdAt || new Date().toISOString(),
     };
     try {
+      setIsSavingProduct(true);
       await onSaveProduct(finalProduct);
       setEditingProduct(null);
       setProductFormError(null);
-      setProductSuccessMessage(`محصول «${finalProduct.name}» با موفقیت در کاتالوگ فروشگاه ذخیره گردید.`);
-      setTimeout(() => setProductSuccessMessage(null), 5000);
+      setProductSuccessMessage(`محصول «${finalProduct.name}» با موفقیت در کاتالوگ فروشگاه ذخیره گردید و بلافاصله برای تمامی خریداران منتشر شد.`);
+      setTimeout(() => setProductSuccessMessage(null), 6000);
     } catch (err: any) {
       setProductFormError(err?.message || 'خطا در ذخیره محصول در پایگاه داده.');
+    } finally {
+      setIsSavingProduct(false);
     }
   };
 
@@ -694,147 +652,161 @@ export const AdminModal: React.FC<AdminModalProps> = ({
     }
   };
 
+  if (!isOpen) return null;
+
   return (
-    <div className="fixed inset-0 z-50 overflow-y-auto bg-black/75 backdrop-blur-xs flex items-center justify-center p-2 sm:p-4">
+    <div 
+      className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex flex-col sm:items-center sm:justify-center sm:p-4 overflow-hidden"
+      onClick={onClose}
+    >
       <div 
-        className="relative w-full max-w-6xl bg-[#FAF8F3] rounded-3xl shadow-2xl border border-[#E4D7C2] overflow-hidden text-right flex flex-col max-h-[94vh]"
+        className="relative w-full h-[100dvh] sm:h-[92vh] sm:max-w-6xl bg-[#FAF8F3] sm:rounded-3xl shadow-2xl border-0 sm:border border-[#E4D7C2] flex flex-col overflow-hidden text-right"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="p-3.5 sm:p-5 border-b border-[#E8DEC9] bg-white flex items-center justify-between">
-          <div className="flex items-center gap-2.5">
-            <div className="w-9 h-9 rounded-2xl bg-[#231709] text-white flex items-center justify-center shadow-xs">
+        <div className="p-3 sm:p-5 border-b border-[#E8DEC9] bg-white flex items-center justify-between gap-2 shrink-0">
+          <div className="flex items-center gap-2 sm:gap-2.5 min-w-0">
+            <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl sm:rounded-2xl bg-[#231709] text-white flex items-center justify-center shrink-0 shadow-xs">
               <KeyRound className="w-4 h-4 text-amber-300" />
             </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <h3 className="text-sm sm:text-base font-black text-[#231709]">
-                  داشبورد مدیریت جامع فروشگاه ناما
+            <div className="min-w-0">
+              <div className="flex items-center gap-1.5">
+                <h3 className="text-xs sm:text-base font-black text-[#231709] truncate">
+                  داشبورد مدیریت فروشگاه ناما
                 </h3>
-                <span className="bg-emerald-100 text-emerald-800 text-[10px] font-black px-2 py-0.5 rounded-full border border-emerald-300">
-                  CRUD و رهگیری بصری ۱۰۰٪ کامل
+                <span className="hidden sm:inline-flex bg-emerald-100 text-emerald-800 text-[10px] font-black px-2 py-0.5 rounded-full border border-emerald-300">
+                  همگام لحظه‌ای
                 </span>
               </div>
-              <p className="text-[11px] text-[#6F7F72]">
-                {isAuthenticated ? 'مدیریت پویا، تنظیمات کامل فروشگاه، پیگیری بصری وضعیت مرسولات و انبارداری' : 'ورود امن مدیریت'}
-              </p>
+              <div className="flex items-center gap-1.5 mt-0.5">
+                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shrink-0" />
+                <p className="text-[10px] sm:text-[11px] text-[#6F7F72] truncate">
+                  {isAuthenticated ? 'متصل به سرور مرکزی - تغییرات فوراً برای همه مشتریان اعمال می‌شود' : 'ورود امن مدیریت'}
+                </p>
+              </div>
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={(e) => { e.preventDefault(); e.stopPropagation(); onClose(); }}
+              onTouchEnd={(e) => { e.preventDefault(); e.stopPropagation(); onClose(); }}
+              className="px-3 py-2 bg-emerald-700 hover:bg-emerald-800 active:scale-95 text-white font-bold text-xs sm:text-sm rounded-xl flex items-center gap-1.5 shadow-sm transition-all cursor-pointer whitespace-nowrap"
+              title="مشاهده صفحه اصلی فروشگاه مانند مشتریان"
+            >
+              <Store className="w-4 h-4 text-amber-300 shrink-0" />
+              <span className="hidden sm:inline">مشاهده و بازگشت به فروشگاه</span>
+              <span className="sm:hidden">فروشگاه</span>
+            </button>
+
             {isAuthenticated && (
-              <div className="flex items-center gap-2">
-                <div className="hidden sm:flex flex-col text-left text-[11px] leading-tight">
-                  <span className="font-bold text-gray-800">{currentUser?.email || 'مدیر سیستم'}</span>
+              <div className="flex items-center gap-1.5">
+                <div className="hidden md:flex flex-col text-left text-[11px] leading-tight">
+                  <span className="font-bold text-gray-800">مدیر سیستم</span>
                   <span className="text-emerald-700 font-semibold text-[10px]">
-                    {authMethod === 'firebase_google' ? '✓ احراز هویت Firebase' : 'دسترسی با رمز عبور'}
+                    دسترسی تایید شده
                   </span>
                 </div>
                 <button
+                  type="button"
                   onClick={handleLogout}
-                  className="text-xs text-red-600 hover:bg-red-50 px-3 py-1.5 rounded-xl border border-red-200 transition-colors font-bold cursor-pointer"
+                  className="text-xs text-red-600 hover:bg-red-50 px-2 py-1.5 rounded-xl border border-red-200 transition-colors font-bold cursor-pointer whitespace-nowrap"
                 >
                   خروج
                 </button>
               </div>
             )}
             <button
-              onClick={onClose}
-              className="w-8 h-8 rounded-full hover:bg-gray-100 flex items-center justify-center text-gray-500 cursor-pointer"
+              type="button"
+              onClick={(e) => { e.preventDefault(); e.stopPropagation(); onClose(); }}
+              onTouchEnd={(e) => { e.preventDefault(); e.stopPropagation(); onClose(); }}
+              className="w-10 h-10 sm:w-11 sm:h-11 rounded-full bg-red-50 hover:bg-red-100 active:bg-red-200 flex items-center justify-center text-red-700 cursor-pointer transition-all shrink-0 border border-red-200 shadow-sm"
+              title="بستن و بازگشت به فروشگاه"
+              aria-label="بستن پنجره"
             >
-              <X className="w-5 h-5" />
+              <X className="w-5 h-5 text-red-700 stroke-[2.5]" />
             </button>
           </div>
         </div>
 
         {/* LOGIN SCREEN */}
         {!isAuthenticated ? (
-          <div className="p-6 sm:p-10 text-center max-w-md mx-auto my-auto space-y-5 animate-in fade-in">
-            <div className="w-16 h-16 rounded-3xl bg-[#FAF3E3] border border-[#E3CE9B] flex items-center justify-center text-[#231709] mx-auto shadow-sm">
-              <Lock className="w-8 h-8 text-[#231709]" />
+          <div className="p-4 sm:p-8 text-center max-w-md mx-auto my-auto space-y-4 animate-in fade-in w-full">
+            <div className="w-14 h-14 sm:w-16 sm:h-16 rounded-3xl bg-[#FAF3E3] border border-[#E3CE9B] flex items-center justify-center text-[#231709] mx-auto shadow-sm">
+              <Lock className="w-7 h-7 sm:w-8 sm:h-8 text-[#231709]" />
             </div>
 
             <div>
-              <h4 className="text-lg font-black text-[#231709]">ورود امن به پنل مدیریت</h4>
+              <h4 className="text-base sm:text-lg font-black text-[#231709]">ورود امن به پنل مدیریت</h4>
               <p className="text-xs text-[#6A5A4A] mt-1">
-                دسترسی به اطلاعات سفارشات، تغییر قیمت‌ها و کاتالوگ فروشگاه
+                دسترسی به سفارشات، تغییر قیمت‌ها و مدیریت محصولات ناما
               </p>
             </div>
 
-            {/* Google Authentication (Primary / Cryptographic) */}
-            <div className="space-y-3">
-              <button
-                type="button"
-                onClick={handleGoogleLogin}
-                disabled={isLoggingInGoogle}
-                className="w-full py-3.5 px-4 rounded-2xl bg-white hover:bg-gray-50 text-gray-800 font-bold text-xs sm:text-sm shadow-sm border border-gray-300 transition-all flex items-center justify-center gap-2.5 cursor-pointer disabled:opacity-50"
-              >
-                {/* Official Google 'G' Icon */}
-                <svg className="w-4 h-4 flex-shrink-0" viewBox="0 0 24 24">
-                  <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
-                  <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
-                  <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" />
-                  <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" />
-                </svg>
-                <span>{isLoggingInGoogle ? 'در حال اتصال به Google...' : 'ورود با حساب گوگل مدیر'}</span>
-              </button>
-
-              <div className="text-[11px] text-gray-500 font-medium">
-                حساب مجاز مدیر: <span className="font-mono font-bold text-gray-700">matinjahanbani2024@gmail.com</span>
+            {/* Secure Admin PIN Authentication Form */}
+            <form onSubmit={(e) => handlePinLogin(e)} className="space-y-3 pt-1">
+              <div className="space-y-1.5 text-right">
+                <label className="text-xs font-bold text-[#4A3B2C] block">
+                  رمز عبور مدیریت:
+                </label>
+                <input
+                  type="password"
+                  dir="ltr"
+                  autoComplete="current-password"
+                  value={passwordInput}
+                  onChange={(e) => setPasswordInput(e.target.value)}
+                  placeholder="••••••••"
+                  className="w-full bg-white border border-[#D5C6AC] rounded-2xl px-4 py-3 text-center text-lg font-mono tracking-widest text-[#231709] focus:outline-none focus:ring-2 focus:ring-[#D4A340] placeholder:tracking-normal placeholder:text-sm"
+                />
               </div>
 
-              {googleLoginError && (
-                <div className="text-xs text-red-600 font-bold bg-red-50 p-2.5 rounded-xl border border-red-200">
-                  {googleLoginError}
-                </div>
-              )}
-            </div>
-
-            <div className="relative flex items-center justify-center">
-              <div className="border-t border-gray-200 w-full" />
-              <span className="bg-[#FAF8F3] px-3 text-[11px] text-gray-400 font-bold whitespace-nowrap">
-                یا ورود با رمز عبور
-              </span>
-            </div>
-
-            {/* PIN Fallback Form */}
-            <form onSubmit={handlePinLogin} className="space-y-3">
-              <input
-                type="password"
-                dir="ltr"
-                value={passwordInput}
-                onChange={(e) => setPasswordInput(e.target.value)}
-                placeholder="رمز عبور مدیریت..."
-                className="w-full bg-white border border-[#D5C6AC] rounded-2xl px-4 py-3 text-center text-base font-mono text-[#231709] focus:outline-none focus:ring-2 focus:ring-[#D4A340]"
-              />
-
               {loginError && (
-                <div className="text-xs text-red-600 font-bold bg-red-50 p-2.5 rounded-xl border border-red-200">
-                  رمز عبور وارد شده نادرست است!
+                <div className="text-xs text-red-700 font-bold bg-red-50 p-2.5 rounded-xl border border-red-200 text-right">
+                  رمز عبور مدیریت نادرست است. لطفاً مجدداً بررسی فرمایید.
                 </div>
               )}
 
               <button
                 type="submit"
-                className="w-full py-3 rounded-2xl bg-[#231709] hover:bg-[#150D05] text-white font-black text-xs sm:text-sm shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer"
+                disabled={isLoggingInPin || !passwordInput.trim()}
+                className="w-full py-3 rounded-2xl bg-[#231709] hover:bg-[#150D05] active:scale-95 text-white font-black text-xs sm:text-sm shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
               >
-                <Unlock className="w-4 h-4 text-amber-300" />
-                <span>ورود با رمز</span>
+                <Unlock className="w-4 h-4 text-[#D4A340]" />
+                <span>{isLoggingInPin ? 'در حال تایید اعتبار...' : 'ورود به پنل مدیریت'}</span>
               </button>
             </form>
 
-            <div className="p-3 bg-amber-50/70 border border-amber-200/80 rounded-2xl text-[11px] text-amber-900 text-right leading-relaxed flex items-start gap-2">
-              <ShieldCheck className="w-4 h-4 text-emerald-700 flex-shrink-0 mt-0.5" />
+            <div className="p-2.5 bg-emerald-50/70 border border-emerald-200/80 rounded-2xl text-[11px] text-emerald-900 text-right leading-relaxed flex items-center gap-2">
+              <ShieldCheck className="w-4 h-4 text-emerald-700 flex-shrink-0" />
               <span>
-                <strong>امنیت دیتابیس:</strong> تغییرات موجودی، سفارش‌ها و اطلاعات مالی توسط قوانین امنیتی Firestore و سرور مرکزی محافظت می‌شوند.
+                <strong>ورود امن مدیریت:</strong> دسترسی به سفارشات و مدیریت با ورود رمز عبور معتبر.
               </span>
             </div>
+
+            <button
+              type="button"
+              onClick={(e) => { e.preventDefault(); e.stopPropagation(); onClose(); }}
+              onTouchEnd={(e) => { e.preventDefault(); e.stopPropagation(); onClose(); }}
+              className="w-full py-3 rounded-2xl bg-[#EDE4D4] hover:bg-[#E2D6C0] active:scale-95 text-[#231709] font-black text-xs sm:text-sm flex items-center justify-center gap-2 transition-all cursor-pointer border border-[#D8CBB2] shadow-xs"
+            >
+              <Store className="w-4 h-4 text-[#A47922]" />
+              <span>مشاهده و خرید در صفحه اصلی فروشگاه</span>
+            </button>
           </div>
         ) : (
           /* AUTHENTICATED ADMIN PANEL */
           <div className="flex-1 flex flex-col overflow-hidden">
             {/* Nav Tabs */}
             <div className="bg-[#FAF8F3] border-b border-[#E8DEC9] px-3 sm:px-4 flex items-center gap-1.5 overflow-x-auto scrollbar-none">
+              <button
+                onClick={onClose}
+                className="my-1.5 py-1.5 px-3 rounded-xl bg-emerald-800 hover:bg-emerald-900 active:scale-95 text-white text-xs font-black flex items-center gap-1.5 flex-shrink-0 shadow-xs transition-all cursor-pointer"
+                title="مشاهده صفحه اصلی فروشگاه و خرید"
+              >
+                <Store className="w-3.5 h-3.5 text-amber-300" />
+                <span>مشاهده سایت</span>
+              </button>
               <button
                 onClick={() => setActiveTab('dashboard')}
                 className={`py-3 px-3 text-xs sm:text-sm font-bold border-b-2 flex items-center gap-1.5 transition-all flex-shrink-0 cursor-pointer ${
@@ -886,7 +858,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                 }`}
               >
                 <FolderPlus className="w-4 h-4 text-[#D4A340]" />
-                <span>مدیریت دسته‌ها (CRUD)</span>
+                <span>مدیریت دسته‌بندی‌ها</span>
                 <span className="text-[11px] text-gray-400">({formSettings.customCategories?.length || 0})</span>
               </button>
 
@@ -1345,6 +1317,16 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                             <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t">
                               {/* Advance Status Pipeline Action Buttons */}
                               <div className="flex flex-wrap items-center gap-2">
+                                {ord.status === 'pending_receipt' && (
+                                  <button
+                                    onClick={() => onUpdateOrderStatus(ord.id, 'approved')}
+                                    className="px-4 py-2 rounded-xl bg-blue-700 hover:bg-blue-800 text-white text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-xs"
+                                  >
+                                    <CheckCircle2 className="w-4 h-4" />
+                                    <span>تایید مستقیم واریزی خریدار (مرحله ۳)</span>
+                                  </button>
+                                )}
+
                                 {ord.status === 'paid_pending_approval' && (
                                   <button
                                     onClick={() => onUpdateOrderStatus(ord.id, 'approved')}
@@ -1451,20 +1433,65 @@ export const AdminModal: React.FC<AdminModalProps> = ({
               {activeTab === 'products' && (
                 <div className="space-y-4">
                   {/* Top action bar */}
-                  <div className="flex flex-wrap items-center justify-between gap-3 bg-white p-3.5 rounded-3xl border border-[#E7DDC9]">
-                    <div className="flex flex-wrap items-center gap-2">
+                  <div className="bg-white p-3.5 sm:p-4 rounded-3xl border border-[#E7DDC9] space-y-3">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <h4 className="text-sm sm:text-base font-black text-[#231709]">
+                            کاتالوگ محصولات فروشگاه
+                          </h4>
+                          <span className="bg-emerald-100 text-emerald-900 text-xs font-bold px-2.5 py-0.5 rounded-full border border-emerald-300">
+                            {products.length} محصول فعال
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-[#718274] mt-0.5">
+                          تغییرات شما فوراً روی سرور ذخیره شده و در تمامی گوشی‌ها و مرورگرها همگام می‌گردد
+                        </p>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setIsNewProduct(true);
+                            const firstCat = formSettings.customCategories?.[0];
+                            setEditingProduct({
+                              name: '',
+                              category: firstCat ? firstCat.id : 'saffron',
+                              categoryLabel: firstCat ? firstCat.name : 'زعفران و زرشک اعلا',
+                              price: 150000,
+                              weight: 'بسته استاندارد',
+                              stock: 25,
+                              isOrganic: true,
+                              isFeatured: true,
+                              origin: 'ایران',
+                              shortDesc: '',
+                              description: '',
+                              image: PRESET_IMAGE_OPTIONS[0].url,
+                            });
+                          }}
+                          className="flex-1 sm:flex-none px-4 py-2.5 rounded-2xl bg-emerald-700 hover:bg-emerald-800 active:scale-95 text-white text-xs sm:text-sm font-black shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer"
+                        >
+                          <Plus className="w-4 h-4 text-amber-300" />
+                          <span>افزودن محصول جدید</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Filter row */}
+                    <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-gray-100">
                       <input
                         type="text"
                         value={productSearch}
                         onChange={(e) => setProductSearch(e.target.value)}
                         placeholder="جستجو در محصولات..."
-                        className="bg-[#FAF8F3] border rounded-xl px-3 py-1.5 text-xs w-44"
+                        className="bg-[#FAF8F3] border border-gray-200 rounded-xl px-3 py-2 text-base sm:text-xs flex-1 min-w-[130px]"
                       />
 
                       <select
                         value={productCategoryFilter}
                         onChange={(e) => setProductCategoryFilter(e.target.value)}
-                        className="bg-[#FAF8F3] border rounded-xl px-2.5 py-1.5 text-xs font-bold text-[#231709]"
+                        className="bg-[#FAF8F3] border border-gray-200 rounded-xl px-2.5 py-2 text-base sm:text-xs font-bold text-[#231709]"
                       >
                         <option value="all">همه دسته‌ها</option>
                         {(formSettings.customCategories || []).map(c => (
@@ -1475,57 +1502,12 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                       <select
                         value={productStockFilter}
                         onChange={(e) => setProductStockFilter(e.target.value as any)}
-                        className="bg-[#FAF8F3] border rounded-xl px-2.5 py-1.5 text-xs font-bold text-[#231709]"
+                        className="bg-[#FAF8F3] border border-gray-200 rounded-xl px-2.5 py-2 text-base sm:text-xs font-bold text-[#231709]"
                       >
                         <option value="all">همه موجودی‌ها</option>
                         <option value="in_stock">فقط موجود در انبار</option>
                         <option value="out_of_stock">کالاهای ناموجود (صفر)</option>
                       </select>
-                    </div>
-
-                    <div className="flex flex-wrap items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setConfirmModal({
-                            title: 'خالی کردن کاتالوگ محصولات',
-                            message: '⚠️ آیا از حذف یکجای تمامی محصولات اطمینان دارید؟ تمام محصولات کاتالوگ پاک خواهند شد و کاتالوگ سفید در اختیار شما قرار می‌گیرد.',
-                            confirmLabel: 'بله، همه محصولات را پاک کن',
-                            isDanger: true,
-                            onConfirm: () => onClearAllProducts(),
-                          });
-                        }}
-                        className="px-3 py-2 rounded-xl bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 text-xs font-bold transition-all flex items-center gap-1 cursor-pointer"
-                        title="خالی کردن کامل کاتالوگ محصولات"
-                      >
-                        <Trash2 className="w-3.5 h-3.5 text-red-600" />
-                        <span>خالی کردن کامل کاتالوگ</span>
-                      </button>
-
-                      <button
-                        onClick={() => {
-                          setIsNewProduct(true);
-                          const firstCat = formSettings.customCategories?.[0];
-                          setEditingProduct({
-                            name: '',
-                            category: firstCat ? firstCat.id : 'organic',
-                            categoryLabel: firstCat ? firstCat.name : 'محصولات ارگانیک و طبیعی',
-                            price: 150000,
-                            weight: 'بسته استاندارد',
-                            stock: 25,
-                            isOrganic: true,
-                            isFeatured: true,
-                            origin: 'ایران',
-                            shortDesc: '',
-                            description: '',
-                            image: PRESET_IMAGE_OPTIONS[0].url,
-                          });
-                        }}
-                        className="px-4 py-2 rounded-2xl bg-[#231709] hover:bg-[#150D05] text-white text-xs font-bold shadow-md transition-all flex items-center gap-1.5 cursor-pointer"
-                      >
-                        <Plus className="w-4 h-4 text-amber-300" />
-                        <span>افزودن محصول جدید</span>
-                      </button>
                     </div>
                   </div>
 
@@ -1560,7 +1542,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                               value={editingProduct.name || ''}
                               onChange={(e) => setEditingProduct({ ...editingProduct, name: e.target.value })}
                               placeholder="مثلاً: چای میوه‌ای اعلا"
-                              className="w-full bg-[#FAF8F3] border rounded-xl px-3 py-2 text-xs font-bold"
+                              className="w-full bg-[#FAF8F3] border rounded-xl px-3 py-2 text-base sm:text-xs font-bold"
                               required
                             />
                           </div>
@@ -1585,7 +1567,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                                   value={inlineNewCatName}
                                   onChange={(e) => setInlineNewCatName(e.target.value)}
                                   placeholder="نام دسته (مثلاً: چای)"
-                                  className="w-full bg-[#FAF8F3] border-2 border-[#D4A340] rounded-xl px-2.5 py-1.5 text-xs font-bold"
+                                  className="w-full bg-[#FAF8F3] border-2 border-[#D4A340] rounded-xl px-2.5 py-1.5 text-base sm:text-xs font-bold"
                                   autoFocus
                                 />
                                 <button
@@ -1619,12 +1601,14 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                                     } else {
                                       const found = formSettings.customCategories?.find(c => c.id === val);
                                       const fallbackLabels: Record<string, string> = {
-                                        organic: 'محصولات ارگانیک و طبیعی',
+                                        saffron: 'زعفران و زرشک اعلا',
                                         tea: 'چای و دمنوش‌های گیاهی',
-                                        herbal: 'عرقیات سنتی',
-                                        spices: 'ادویه و چاشنی ناب',
-                                        nuts: 'خشکبار و آجیل اعلا',
-                                        oil: 'روغن‌های فرابکر گیاهی',
+                                        spices: 'هل و ادویه‌جات ناب',
+                                        distillates: 'گلاب و عرقیات سنتی',
+                                        nuts: 'خشکبار و آجیل دستچین',
+                                        herbal: 'گیاهان دارویی و سلامت',
+                                        organic: 'محصولات ارگانیک و طبیعی',
+                                        other: 'سایر محصولات اصیل ناما',
                                       };
                                       const label = found ? found.name : (fallbackLabels[val] || val);
                                       setEditingProduct({
@@ -1634,7 +1618,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                                       });
                                     }
                                   }}
-                                  className="w-full bg-[#FAF8F3] border rounded-xl px-3 py-2 text-xs font-bold"
+                                  className="w-full bg-[#FAF8F3] border rounded-xl px-3 py-2 text-base sm:text-xs font-bold"
                                 >
                                   {formSettings.customCategories && formSettings.customCategories.length > 0 ? (
                                     formSettings.customCategories.map((cat) => (
@@ -1644,12 +1628,14 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                                     ))
                                   ) : (
                                     <>
-                                      <option value="organic">🌿 محصولات ارگانیک و طبیعی</option>
+                                      <option value="saffron">✨ زعفران و زرشک اعلا</option>
                                       <option value="tea">🍵 چای و دمنوش‌های گیاهی</option>
-                                      <option value="herbal">🌸 عرقیات سنتی</option>
-                                      <option value="spices">🧂 ادویه و چاشنی ناب</option>
-                                      <option value="nuts">🥜 خشکبار و آجیل اعلا</option>
-                                      <option value="oil">🫒 روغن‌های فرابکر گیاهی</option>
+                                      <option value="spices">🧂 هل و ادویه‌جات ناب</option>
+                                      <option value="distillates">🌸 گلاب و عرقیات سنتی</option>
+                                      <option value="nuts">🥜 خشکبار و آجیل دستچین</option>
+                                      <option value="herbal">🌿 گیاهان دارویی و سلامت</option>
+                                      <option value="organic">🍃 محصولات ارگانیک و طبیعی</option>
+                                      <option value="other">🍯 سایر محصولات اصیل ناما</option>
                                     </>
                                   )}
                                   <option value="__NEW__">➕ تایپ دسته‌بندی دلخواه جدید...</option>
@@ -1669,7 +1655,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                                     });
                                   }}
                                   placeholder="یا عنوان دسته‌بندی دلخواه خود را بنویسید..."
-                                  className="w-full bg-white border border-gray-200 rounded-lg px-2.5 py-1 text-[11px] text-gray-700"
+                                  className="w-full bg-white border border-gray-200 rounded-lg px-2.5 py-1 text-base sm:text-xs text-gray-700"
                                 />
                               </div>
                             )}
@@ -1682,7 +1668,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                               value={editingProduct.weight || ''}
                               onChange={(e) => setEditingProduct({ ...editingProduct, weight: e.target.value })}
                               placeholder="مثلاً: بسته ۲۵۰ گرمی، ۱ کیلوگرم..."
-                              className="w-full bg-[#FAF8F3] border rounded-xl px-3 py-2 text-xs"
+                              className="w-full bg-[#FAF8F3] border rounded-xl px-3 py-2 text-base sm:text-xs"
                             />
                           </div>
                         </div>
@@ -1694,7 +1680,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                               type="number"
                               value={editingProduct.price !== undefined && editingProduct.price !== null ? editingProduct.price : ''}
                               onChange={(e) => setEditingProduct({ ...editingProduct, price: e.target.value === '' ? ('' as any) : Number(e.target.value) })}
-                              className="w-full bg-[#FAF8F3] border rounded-xl px-3 py-2 text-xs font-bold"
+                              className="w-full bg-[#FAF8F3] border rounded-xl px-3 py-2 text-base sm:text-xs font-bold"
                               required
                               placeholder="مثلاً: ۱۵۰،۰۰۰"
                             />
@@ -1707,7 +1693,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                               value={editingProduct.originalPrice || ''}
                               onChange={(e) => setEditingProduct({ ...editingProduct, originalPrice: e.target.value ? Number(e.target.value) : undefined })}
                               placeholder="جهت نمایش تخفیف"
-                              className="w-full bg-[#FAF8F3] border rounded-xl px-3 py-2 text-xs"
+                              className="w-full bg-[#FAF8F3] border rounded-xl px-3 py-2 text-base sm:text-xs"
                             />
                           </div>
 
@@ -1717,7 +1703,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                               type="number"
                               value={editingProduct.stock ?? 10}
                               onChange={(e) => setEditingProduct({ ...editingProduct, stock: Number(e.target.value) })}
-                              className="w-full bg-[#FAF8F3] border rounded-xl px-3 py-2 text-xs font-bold"
+                              className="w-full bg-[#FAF8F3] border rounded-xl px-3 py-2 text-base sm:text-xs font-bold"
                             />
                           </div>
 
@@ -1728,7 +1714,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                               value={editingProduct.origin || 'ایران'}
                               onChange={(e) => setEditingProduct({ ...editingProduct, origin: e.target.value })}
                               placeholder="گیلان، سبلان، شیراز..."
-                              className="w-full bg-[#FAF8F3] border rounded-xl px-3 py-2 text-xs"
+                              className="w-full bg-[#FAF8F3] border rounded-xl px-3 py-2 text-base sm:text-xs"
                             />
                           </div>
                         </div>
@@ -1761,7 +1747,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                               value={editingProduct.image || ''}
                               onChange={(e) => setEditingProduct({ ...editingProduct, image: e.target.value })}
                               placeholder="یا لینک تصویر اینترنتی..."
-                              className="flex-1 bg-[#FAF8F3] border rounded-xl px-3 py-2 text-xs font-mono"
+                              className="flex-1 bg-[#FAF8F3] border rounded-xl px-3 py-2 text-base sm:text-xs font-mono"
                             />
                           </div>
 
@@ -1772,7 +1758,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                               انتخاب سریع از آرشیو تصاویر باکیفیت ناما:
                             </span>
                             <div className="grid grid-cols-4 sm:grid-cols-6 gap-2">
-                              {PRESET_IMAGE_OPTIONS.map((img, i) => (
+                              {PRESET_IMAGE_OPTIONS.map((img: { name: string; url: string; category?: string }, i: number) => (
                                 <button
                                   type="button"
                                   key={i}
@@ -1799,7 +1785,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                             value={editingProduct.shortDesc || ''}
                             onChange={(e) => setEditingProduct({ ...editingProduct, shortDesc: e.target.value })}
                             placeholder="توضیح یک‌خطی جهت نمایش در کارت محصول"
-                            className="w-full bg-[#FAF8F3] border rounded-xl px-3 py-2 text-xs"
+                            className="w-full bg-[#FAF8F3] border rounded-xl px-3 py-2 text-base sm:text-xs"
                           />
                         </div>
 
@@ -1810,7 +1796,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                             value={editingProduct.description || ''}
                             onChange={(e) => setEditingProduct({ ...editingProduct, description: e.target.value })}
                             placeholder="معرفی محصول، اصالت، روش مصرف..."
-                            className="w-full bg-[#FAF8F3] border rounded-xl px-3 py-2 text-xs"
+                            className="w-full bg-[#FAF8F3] border rounded-xl px-3 py-2 text-base sm:text-xs"
                           />
                         </div>
 
@@ -1857,18 +1843,19 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                           </label>
                         </div>
 
-                        <div className="flex items-center gap-3 pt-2">
+                        <div className="flex flex-col sm:flex-row items-center gap-2.5 pt-3 border-t">
                           <button
                             type="submit"
-                            className="px-6 py-2.5 rounded-xl bg-[#231709] hover:bg-[#150D05] text-white text-xs font-bold shadow-md transition-all flex items-center gap-1.5 cursor-pointer"
+                            disabled={isSavingProduct}
+                            className="w-full sm:w-auto px-6 py-3 rounded-2xl bg-emerald-700 hover:bg-emerald-800 disabled:opacity-50 active:scale-95 text-white text-xs sm:text-sm font-black shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer"
                           >
                             <Save className="w-4 h-4 text-amber-300" />
-                            <span>ذخیره محصول در کاتالوگ</span>
+                            <span>{isSavingProduct ? 'در حال ذخیره و انتشار...' : 'ذخیره و انتشار فوری در فروشگاه'}</span>
                           </button>
                           <button
                             type="button"
                             onClick={() => setEditingProduct(null)}
-                            className="px-4 py-2.5 rounded-xl border text-xs font-semibold hover:bg-gray-100 cursor-pointer"
+                            className="w-full sm:w-auto px-5 py-2.5 rounded-xl border border-gray-300 text-xs font-bold text-gray-700 hover:bg-gray-100 cursor-pointer"
                           >
                             انصراف
                           </button>
@@ -3200,6 +3187,67 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                 </div>
               )}
 
+            </div>
+
+            {/* MOBILE QUICK BOTTOM NAVIGATION BAR */}
+            <div className="sm:hidden border-t border-[#E8DEC9] bg-white px-1 py-1.5 flex items-center justify-around z-20 shrink-0 shadow-lg">
+              <button
+                type="button"
+                onClick={() => setActiveTab('products')}
+                className={`flex flex-col items-center justify-center py-1.5 px-3 rounded-2xl text-[11px] font-bold transition-all cursor-pointer ${
+                  activeTab === 'products' ? 'text-[#231709] bg-amber-100/70 font-black' : 'text-gray-500 hover:text-gray-800'
+                }`}
+              >
+                <Package className={`w-5 h-5 mb-0.5 ${activeTab === 'products' ? 'text-[#231709]' : 'text-gray-400'}`} />
+                <span>محصولات</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setActiveTab('orders')}
+                className={`relative flex flex-col items-center justify-center py-1.5 px-3 rounded-2xl text-[11px] font-bold transition-all cursor-pointer ${
+                  activeTab === 'orders' ? 'text-[#231709] bg-amber-100/70 font-black' : 'text-gray-500 hover:text-gray-800'
+                }`}
+              >
+                <ShoppingBag className={`w-5 h-5 mb-0.5 ${activeTab === 'orders' ? 'text-[#2F4E34]' : 'text-gray-400'}`} />
+                <span>سفارشات</span>
+                {pendingVerificationCount > 0 && (
+                  <span className="absolute top-1 right-2 w-2 h-2 bg-red-500 rounded-full animate-ping" />
+                )}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setActiveTab('categories')}
+                className={`flex flex-col items-center justify-center py-1.5 px-3 rounded-2xl text-[11px] font-bold transition-all cursor-pointer ${
+                  activeTab === 'categories' ? 'text-[#231709] bg-amber-100/70 font-black' : 'text-gray-500 hover:text-gray-800'
+                }`}
+              >
+                <FolderPlus className={`w-5 h-5 mb-0.5 ${activeTab === 'categories' ? 'text-[#D4A340]' : 'text-gray-400'}`} />
+                <span>دسته‌ها</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setActiveTab('settings')}
+                className={`flex flex-col items-center justify-center py-1.5 px-3 rounded-2xl text-[11px] font-bold transition-all cursor-pointer ${
+                  activeTab === 'settings' ? 'text-[#231709] bg-amber-100/70 font-black' : 'text-gray-500 hover:text-gray-800'
+                }`}
+              >
+                <Settings className={`w-5 h-5 mb-0.5 ${activeTab === 'settings' ? 'text-gray-800' : 'text-gray-400'}`} />
+                <span>تنظیمات</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setActiveTab('dashboard')}
+                className={`flex flex-col items-center justify-center py-1.5 px-3 rounded-2xl text-[11px] font-bold transition-all cursor-pointer ${
+                  activeTab === 'dashboard' ? 'text-[#231709] bg-amber-100/70 font-black' : 'text-gray-500 hover:text-gray-800'
+                }`}
+              >
+                <BarChart3 className={`w-5 h-5 mb-0.5 ${activeTab === 'dashboard' ? 'text-[#D4A340]' : 'text-gray-400'}`} />
+                <span>داشبورد</span>
+              </button>
             </div>
           </div>
         )}

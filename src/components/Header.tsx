@@ -17,9 +17,10 @@ interface HeaderProps {
   isCartBumping?: boolean;
   onOpenCart: () => void;
   onOpenTracking: () => void;
-  onOpenAdmin: () => void;
+  onOpenAdmin?: () => void;
   searchQuery: string;
   onSearchChange: (q: string) => void;
+  isAdminLoggedIn?: boolean;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -31,6 +32,7 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenAdmin,
   searchQuery,
   onSearchChange,
+  isAdminLoggedIn = false,
 }) => {
   return (
     <header className="sticky top-0 z-40 bg-[#FAF7F0]/95 backdrop-blur-md border-b border-[#E8DEC9] shadow-[0_2px_15px_rgba(0,0,0,0.04)]">
@@ -98,16 +100,25 @@ export const Header: React.FC<HeaderProps> = ({
           </button>
 
           {/* 3. Admin Panel Button */}
-          <button
-            type="button"
-            onClick={onOpenAdmin}
-            className="shrink-0 inline-flex items-center justify-center gap-1.5 h-9 sm:h-10 px-2.5 sm:px-3.5 text-xs sm:text-sm font-bold text-[#4B3B2B] bg-[#F5EFE4] hover:bg-[#EADFCB] rounded-full border border-[#D9CDBF] transition-colors cursor-pointer active:scale-95 shadow-xs"
-            title="ورود به پنل مدیریت فروشگاه"
-            aria-label="پنل مدیریت"
-          >
-            <KeyRound className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-[#B8860B] shrink-0" />
-            <span className="hidden md:inline whitespace-nowrap">پنل مدیریت</span>
-          </button>
+          {onOpenAdmin && (
+            <button
+              type="button"
+              onClick={onOpenAdmin}
+              className={`shrink-0 relative inline-flex items-center justify-center gap-1.5 h-9 sm:h-10 px-2 sm:px-3 text-xs font-bold rounded-full border transition-colors cursor-pointer active:scale-95 shadow-xs ${
+                isAdminLoggedIn
+                  ? 'text-emerald-950 bg-emerald-50 hover:bg-emerald-100 border-emerald-300 ring-2 ring-emerald-400/40'
+                  : 'text-[#4B3B2B] bg-[#F5EFE4] hover:bg-[#EADFCB] border-[#D9CDBF]'
+              }`}
+              title="ورود به پنل مدیریت فروشگاه"
+              aria-label="پنل مدیریت"
+            >
+              <KeyRound className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-[#B8860B] shrink-0" />
+              <span className="whitespace-nowrap">
+                <span className="hidden sm:inline">پنل </span>
+                {isAdminLoggedIn ? 'مدیریت (فعال)' : 'مدیریت'}
+              </span>
+            </button>
+          )}
 
           {/* 4. Shopping Cart Button */}
           <button

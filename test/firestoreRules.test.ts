@@ -33,7 +33,7 @@ export async function runFirestoreRulesUnitTests() {
       firestore: {
         rules,
         host: '127.0.0.1',
-        port: 8080
+        port: 8085
       }
     });
   } catch (err: any) {

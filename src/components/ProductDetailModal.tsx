@@ -29,6 +29,14 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
 }) => {
   const [quantity, setQuantity] = useState(1);
 
+  React.useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [onClose]);
+
   if (!product) return null;
 
   const handleAdd = () => {
@@ -39,17 +47,24 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
   const hasDiscount = product.originalPrice && product.originalPrice > product.price;
 
   return (
-    <div className="fixed inset-0 z-50 overflow-y-auto bg-black/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-5">
+    <div 
+      className="fixed inset-0 z-50 overflow-y-auto bg-black/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-5"
+      onClick={onClose}
+    >
       <div 
         className="relative w-full max-w-3xl bg-[#FAF8F3] rounded-3xl shadow-2xl border border-[#E4D7C2] overflow-hidden text-right animate-in fade-in zoom-in-95 duration-200"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Close Button */}
         <button
-          onClick={onClose}
-          className="absolute top-4 left-4 z-20 w-9 h-9 rounded-full bg-white/90 hover:bg-white text-gray-700 shadow-md flex items-center justify-center transition-all"
+          type="button"
+          onClick={(e) => { e.preventDefault(); e.stopPropagation(); onClose(); }}
+          onTouchEnd={(e) => { e.preventDefault(); e.stopPropagation(); onClose(); }}
+          className="absolute top-4 left-4 z-20 w-10 h-10 rounded-full bg-white/95 hover:bg-red-50 text-gray-700 hover:text-red-700 shadow-md flex items-center justify-center transition-all cursor-pointer border border-gray-200"
+          title="بستن پنجره"
+          aria-label="بستن"
         >
-          <X className="w-5 h-5" />
+          <X className="w-5 h-5 stroke-[2.5]" />
         </button>
 
         <div className="grid grid-cols-1 md:grid-cols-12">

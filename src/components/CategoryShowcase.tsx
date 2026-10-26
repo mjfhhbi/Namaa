@@ -49,7 +49,7 @@ export const CategoryShowcase: React.FC<CategoryShowcaseProps> = ({
     image: info.image,
   }));
 
-  if (categories.length === 0) return null;
+  if (categories.length <= 1) return null;
 
   return (
     <section className="my-10 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">

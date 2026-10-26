@@ -36,7 +36,6 @@ export const Hero: React.FC<HeroProps> = ({
   const badgeText = settings.heroBadge || "محصولات غذایی ۱۰۰٪ طبیعی، سالم و دستچین ایرانی";
   const titleText = settings.heroTitle || "از نام و جان، برای طعمی ماندگار";
   const subtitleText = settings.heroSubtitle || "سفره‌ای پربرکت با اصیل‌ترین خوراکی‌های سنتی، سالم و سلامت‌محور ایران؛ دستچین‌شده با تعهد به خلوص، کیفیت ممتاز و طعمی ماندگار.";
-  const buttonText = settings.heroButtonText || "مشاهده و خرید محصولات";
 
   return (
     <section className="relative overflow-hidden bg-gradient-to-b from-[#FAF7F0] via-[#F4EDE1] to-[#FAF7F0] pt-6 pb-10 border-b border-[#E8DEC9]">
@@ -92,19 +91,7 @@ export const Hero: React.FC<HeroProps> = ({
                 <span className="font-bold">{settings.qualityBadge4 || "ارسال فوری سراسری"}</span>
               </div>
             </div>
-
-            {/* Quick Action Button */}
-            <div className="pt-2 flex flex-wrap gap-3">
-              <button
-                onClick={onScrollToCatalog}
-                className="px-6 py-3 bg-[#231709] hover:bg-[#150D05] active:scale-95 text-[#FAF7F0] font-black text-sm sm:text-base rounded-full shadow-lg shadow-[#231709]/20 transition-all flex items-center gap-2"
-              >
-                <span>{buttonText}</span>
-                <span className="text-[#D4A340]">←</span>
-              </button>
-            </div>
           </div>
-
         </div>
 
         {/* Categories Navigation Bar (Shown when categories exist) */}

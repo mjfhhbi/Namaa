@@ -31,6 +31,15 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
   onProceedToCheckout,
   settings,
 }) => {
+  React.useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, onClose]);
+
   if (!isOpen) return null;
 
   const subtotal = items.reduce((sum, item) => sum + item.product.price * item.quantity, 0);
@@ -38,7 +47,10 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
   const total = subtotal + shippingCost;
 
   return (
-    <div className="fixed inset-0 z-50 overflow-hidden bg-black/60 backdrop-blur-xs flex justify-end">
+    <div 
+      className="fixed inset-0 z-50 overflow-hidden bg-black/60 backdrop-blur-xs flex justify-end"
+      onClick={onClose}
+    >
       <div 
         className="w-full max-w-md bg-[#FAF8F3] h-full shadow-2xl flex flex-col justify-between text-right animate-in slide-in-from-left duration-300"
         onClick={(e) => e.stopPropagation()}
@@ -58,10 +70,14 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
           </div>
 
           <button
-            onClick={onClose}
-            className="w-8 h-8 rounded-full hover:bg-gray-100 flex items-center justify-center text-gray-500 transition-colors"
+            type="button"
+            onClick={(e) => { e.preventDefault(); e.stopPropagation(); onClose(); }}
+            onTouchEnd={(e) => { e.preventDefault(); e.stopPropagation(); onClose(); }}
+            className="w-10 h-10 rounded-full hover:bg-red-50 hover:text-red-700 active:bg-red-100 flex items-center justify-center text-gray-500 transition-colors cursor-pointer border border-transparent hover:border-red-200"
+            title="بستن سبد خرید"
+            aria-label="بستن سبد خرید"
           >
-            <X className="w-5 h-5" />
+            <X className="w-5 h-5 stroke-[2.5]" />
           </button>
         </div>
 

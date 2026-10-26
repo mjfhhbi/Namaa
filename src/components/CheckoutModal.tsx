@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { CartItem, Order, StoreSettings } from '../types';
+import { CartItem, Order, StoreSettings, OrderStatus } from '../types';
 import { 
   X, 
   CreditCard, 
@@ -41,10 +41,13 @@ export const toEnglishDigits = (str: string): string => {
 };
 
 const IRAN_PROVINCES = [
+  'خراسان رضوی',
+  'خراسان جنوبی',
+  'خراسان شمالی',
+  'خراسان',
   'تهران',
   'اصفهان',
   'فارس',
-  'خراسان رضوی',
   'آذربایجان شرقی',
   'مازندران',
   'گیلان',
@@ -67,8 +70,6 @@ const IRAN_PROVINCES = [
   'بوشهر',
   'زنجان',
   'چهارمحال و بختیاری',
-  'خراسان جنوبی',
-  'خراسان شمالی',
   'کهگیلویه و بویراحمد',
   'سمنان',
   'ایلام'
@@ -160,10 +161,10 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
   const isPhoneValid = /^09\d{9}$/.test(cleanPhone);
 
   const cleanPostal = toEnglishDigits(postalCode).replace(/\D/g, '');
-  const isPostalValid = cleanPostal.length === 10;
+  const isPostalValid = cleanPostal.length >= 5;
 
   const isNameValid = customerName.trim().length >= 3;
-  const isAddressValid = address.trim().length >= 10;
+  const isAddressValid = address.trim().length >= 5;
   const isProvinceValid = province.trim().length >= 2;
   const isCityValid = city.trim().length >= 2;
 
@@ -231,14 +232,14 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 
     if (!address.trim()) {
       errs.address = 'آدرس پستی جهت ارسال مرسوله الزامی است';
-    } else if (address.trim().length < 10) {
-      errs.address = 'لطفاً آدرس را با جزئیات کامل‌تر (خیابان، کوچه، پلاک، واحد) وارد نمایید (حداقل ۱۰ کاراکتر)';
+    } else if (address.trim().length < 5) {
+      errs.address = 'لطفاً آدرس پستی را با جزئیات وارد فرمایید (حداقل ۵ کاراکتر)';
     }
 
     if (!cleanPostal) {
-      errs.postalCode = 'کد پستی ۱۰ رقمی تحویل‌گیرنده الزامی است';
-    } else if (cleanPostal.length !== 10) {
-      errs.postalCode = `کد پستی باید دقیقاً ۱۰ رقم باشد (در حال حاضر ${cleanPostal.length} رقم است)`;
+      errs.postalCode = 'کد پستی تحویل‌گیرنده الزامی است';
+    } else if (cleanPostal.length < 5) {
+      errs.postalCode = 'کد پستی باید حداقل ۵ رقم باشد (۱۰ رقم استاندارد)';
     }
 
     setStep1Errors(errs);
@@ -290,13 +291,15 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
     }
 
     setUploadError(null);
-    if (chosenMethod === 'card_to_card' && !receiptImage) {
-      setUploadError('ارسال اسکرین‌شات از رسید واریزی اجباری است! لطفاً تصویر فیش کارت‌به‌کارت را بارگذاری فرمایید.');
-      return;
-    }
-
     setIsSubmitting(true);
     const orderId = `NM-${Math.floor(1000 + Math.random() * 9000)}`;
+
+    const hasReceipt = Boolean(receiptImage && receiptImage.trim().length > 0);
+    const orderStatus: OrderStatus = chosenMethod === 'card_to_card' 
+      ? (hasReceipt ? 'paid_pending_approval' : 'pending_receipt') 
+      : 'pending_receipt';
+
+    const finalPostal = cleanPostal ? (cleanPostal.length >= 10 ? cleanPostal.slice(0, 10) : cleanPostal.padEnd(10, '0')) : '1111111111';
 
     const newOrder: Order = {
       id: orderId,
@@ -305,7 +308,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
       province: province.trim(),
       city: city.trim(),
       address: address.trim(),
-      postalCode: cleanPostal,
+      postalCode: finalPostal,
       items: items.map(i => ({
         productId: i.product.id,
         name: i.product.name,
@@ -319,12 +322,12 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
       totalAmount,
       discountCode: appliedCoupon?.code || undefined,
       discountAmount: discountAmount > 0 ? discountAmount : undefined,
-      status: chosenMethod === 'card_to_card' ? 'paid_pending_approval' : 'pending_receipt',
+      status: orderStatus,
       paymentMethod: chosenMethod,
       zarinpalAuthority: chosenMethod === 'zarinpal' ? `ZP-${Math.floor(10000000 + Math.random() * 90000000)}` : undefined,
       cardLast4: chosenMethod === 'card_to_card' ? (toEnglishDigits(cardLast4).replace(/\D/g, '').slice(0, 4) || undefined) : undefined,
       paymentReference: chosenMethod === 'card_to_card' ? (toEnglishDigits(paymentReference).trim() || undefined) : undefined,
-      receiptImage: chosenMethod === 'card_to_card' ? receiptImage : undefined,
+      receiptImage: chosenMethod === 'card_to_card' && hasReceipt ? receiptImage : undefined,
       notes: notes.trim() || undefined,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
@@ -350,8 +353,20 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
     }
   };
 
+  React.useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && step !== 3) onClose();
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, step, onClose]);
+
   return (
-    <div className="fixed inset-0 z-50 overflow-y-auto bg-black/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-5">
+    <div 
+      className="fixed inset-0 z-50 overflow-y-auto bg-black/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-5"
+      onClick={() => { if (step !== 3) onClose(); }}
+    >
       <div 
         className="relative w-full max-w-2xl bg-[#FAF8F3] rounded-3xl shadow-2xl border border-[#E4D7C2] overflow-hidden text-right animate-in fade-in zoom-in-95 duration-200"
         onClick={(e) => e.stopPropagation()}
@@ -379,10 +394,14 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 
             {step !== 3 && (
               <button
-                onClick={onClose}
-                className="w-8 h-8 rounded-full hover:bg-gray-100 flex items-center justify-center text-gray-500"
+                type="button"
+                onClick={(e) => { e.preventDefault(); e.stopPropagation(); onClose(); }}
+                onTouchEnd={(e) => { e.preventDefault(); e.stopPropagation(); onClose(); }}
+                className="w-10 h-10 rounded-full hover:bg-red-50 hover:text-red-700 active:bg-red-100 flex items-center justify-center text-gray-500 transition-colors cursor-pointer border border-transparent hover:border-red-200"
+                title="بستن"
+                aria-label="بستن"
               >
-                <X className="w-5 h-5" />
+                <X className="w-5 h-5 stroke-[2.5]" />
               </button>
             )}
           </div>
@@ -1083,25 +1102,21 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 
                 <button
                   type="button"
-                  disabled={isSubmitting || !receiptImage}
+                  disabled={isSubmitting}
                   onClick={() => handleFinalSubmit('card_to_card')}
-                  className={`flex-1 py-3.5 px-4 rounded-2xl text-white font-black text-sm sm:text-base shadow-lg transition-all flex items-center justify-center gap-2 ${
-                    !receiptImage 
-                      ? 'bg-gray-400 cursor-not-allowed opacity-80' 
-                      : 'bg-[#163826] hover:bg-[#0E2619] shadow-[#163826]/20'
-                  }`}
+                  className="flex-1 py-3.5 px-4 rounded-2xl text-white font-black text-sm sm:text-base shadow-lg transition-all flex items-center justify-center gap-2 bg-[#163826] hover:bg-[#0E2619] active:scale-98 shadow-[#163826]/20 cursor-pointer"
                 >
                   {isSubmitting ? (
                     <span>در حال ثبت سفارش در دیتابیس...</span>
-                  ) : !receiptImage ? (
+                  ) : receiptImage ? (
                     <>
-                      <FileCheck className="w-4 h-4 text-gray-200" />
-                      <span>ابتدا تصویر فیش را انتخاب کنید</span>
+                      <CheckCircle2 className="w-4 h-4 text-[#D4A340]" />
+                      <span>تأیید نهایی و ثبت سفارش با فیش</span>
                     </>
                   ) : (
                     <>
-                      <CheckCircle2 className="w-4 h-4 text-[#D4A340]" />
-                      <span>تأیید نهایی و ثبت سفارش خرید</span>
+                      <FileCheck className="w-4 h-4 text-amber-300" />
+                      <span>ثبت نهایی سفارش (ارسال فیش پس از واریز)</span>
                     </>
                   )}
                 </button>

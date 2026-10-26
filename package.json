@@ -5,14 +5,15 @@
   "type": "module",
   "scripts": {
     "dev": "tsx server.ts",
-    "build": "vite build && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs",
+    "build": "vite build && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --loader:.webp=dataurl --loader:.png=dataurl --sourcemap --outfile=dist/server.cjs",
     "start": "node dist/server.cjs",
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
     "test:unit": "tsx test/inMemoryBusinessLogic.test.ts",
     "test:rules": "tsx test/firestoreRules.test.ts",
-    "test:emulator": "firebase emulators:exec --only firestore,auth --project demo-nama-test \"tsx test/firestoreRules.test.ts\""
+    "test:emulator": "firebase emulators:exec --only firestore --project demo-nama-test \"tsx test/firestoreRules.test.ts\"",
+    "test:orders-emu": "firebase emulators:exec --only firestore --project demo-nama-test \"tsx test/orderIntegration.test.ts\""
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.3.3",

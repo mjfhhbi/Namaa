@@ -24,34 +24,48 @@ import {
   subscribeToOrders,
   subscribeToSettings
 } from './services/storeService';
-import { testFirestoreConnection } from './firebase';
+import { testFirestoreConnection, auth, onAuthStateChanged, signOut } from './firebase';
 import { playNewOrderChime } from './utils/audioAlert';
 import { Header } from './components/Header';
 import { Hero } from './components/Hero';
 import { CategoryShowcase } from './components/CategoryShowcase';
-import { PromoBanners } from './components/PromoBanners';
-import { FeaturedCollections } from './components/FeaturedCollections';
 import { ProductCard } from './components/ProductCard';
 import { ProductDetailModal } from './components/ProductDetailModal';
 import { CartDrawer } from './components/CartDrawer';
 import { CheckoutModal } from './components/CheckoutModal';
 import { OrderTrackingModal } from './components/OrderTrackingModal';
 import { AdminModal } from './components/AdminModal';
+import { AdminLoginDialog } from './components/AdminLoginDialog';
 import { Footer } from './components/Footer';
 import { WhatsAppButton } from './components/WhatsAppButton';
-import { DEFAULT_SETTINGS } from './data/defaultProducts';
+import { DEFAULT_STORE_SETTINGS, AUTHENTIC_DEFAULT_PRODUCTS } from './types';
 import { 
   SlidersHorizontal, 
   Sparkles, 
-  Leaf,
-  Filter,
-  Plus
+  Leaf, 
+  Filter, 
+  Plus, 
+  KeyRound 
 } from 'lucide-react';
 
 export default function App() {
-  const [products, setProducts] = useState<Product[]>([]);
-  const [orders, setOrders] = useState<Order[]>([]);
-  const [settings, setSettings] = useState<StoreSettings>(DEFAULT_SETTINGS);
+  const [products, setProducts] = useState<Product[]>(AUTHENTIC_DEFAULT_PRODUCTS);
+  // Local caching in SessionStorage for instantaneous display without UI flickering
+  const [orders, setOrders] = useState<Order[]>(() => {
+    try {
+      const cached = sessionStorage.getItem('nama_cached_orders_v1');
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return parsed;
+        }
+      }
+    } catch (e) {
+      console.warn('SessionStorage cached orders parse error:', e);
+    }
+    return [];
+  });
+  const [settings, setSettings] = useState<StoreSettings>(DEFAULT_STORE_SETTINGS);
   const [cart, setCart] = useState<CartItem[]>(() => {
     try {
       const raw = localStorage.getItem('nama_cart_items_v1');
@@ -72,7 +86,75 @@ export default function App() {
   const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
   const [isTrackingOpen, setIsTrackingOpen] = useState(false);
   const [isAdminOpen, setIsAdminOpen] = useState(false);
+  const [isAdminLoginDialogOpen, setIsAdminLoginDialogOpen] = useState(false);
+  const [isAdminLoggedIn, setIsAdminLoggedIn] = useState(false);
+  const [adminUserEmail, setAdminUserEmail] = useState<string | null>(null);
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
+
+  // Monitor Admin Login State via secure Session Token (Pure PIN/Password, no Google popups)
+  useEffect(() => {
+    const checkToken = () => {
+      const token = sessionStorage.getItem('nama_admin_token');
+      if (token) {
+        setIsAdminLoggedIn(true);
+        setAdminUserEmail('مدیر سیستم');
+      } else {
+        setIsAdminLoggedIn(false);
+        setAdminUserEmail(null);
+      }
+    };
+    checkToken();
+    window.addEventListener('storage', checkToken);
+    return () => window.removeEventListener('storage', checkToken);
+  }, []);
+
+  const handleOpenAdminTrigger = () => {
+    const token = sessionStorage.getItem('nama_admin_token');
+    if (token) {
+      setIsAdminOpen(true);
+    } else {
+      setIsAdminLoginDialogOpen(true);
+    }
+  };
+
+  const handleAdminLoginSuccess = (_token: string) => {
+    setIsAdminLoggedIn(true);
+    setAdminUserEmail('مدیر سیستم');
+    setIsAdminLoginDialogOpen(false);
+    setIsAdminOpen(true);
+    showToast('ورود به پنل مدیریت با موفقیت انجام شد.');
+  };
+
+  // پس از لود شدن کامل صفحه، اگر پارامترهای اضافی مثل ?admin=true یا مسیر /admin در URL وجود داشت،
+  // دیالوگ یا پنل مدیریت باز شده و پارامترهای اضافی فوراً از نوار آدرس مرورگر پاک می‌شوند تا امنیت و زیبایی ظاهری سایت حفظ شود
+  useEffect(() => {
+    try {
+      if (typeof window !== 'undefined') {
+        const url = new URL(window.location.href);
+        const hasAdminParam = url.searchParams.has('admin');
+        const isPathAdmin = url.pathname.toLowerCase().startsWith('/admin');
+        const isHashAdmin = url.hash === '#admin';
+
+        if (hasAdminParam || isPathAdmin || isHashAdmin) {
+          const token = sessionStorage.getItem('nama_admin_token');
+          if (token) {
+            setIsAdminOpen(true);
+          } else {
+            setIsAdminLoginDialogOpen(true);
+          }
+
+          // پاکسازی فوری پارامترهای اضافه از URL مرورگر با حفظ زیبایی و امنیت
+          url.searchParams.delete('admin');
+          const cleanPath = isPathAdmin ? '/' : url.pathname;
+          const cleanSearch = url.searchParams.toString() ? `?${url.searchParams.toString()}` : '';
+          const cleanUrl = `${cleanPath}${cleanSearch}`;
+          window.history.replaceState({}, document.title, cleanUrl);
+        }
+      }
+    } catch (e) {
+      console.warn('URL clean effect notice:', e);
+    }
+  }, []);
 
   // Toast Notification
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -86,6 +168,17 @@ export default function App() {
     }
   }, [cart]);
 
+  // Keep SessionStorage cache in sync whenever orders are updated locally
+  useEffect(() => {
+    try {
+      if (orders && orders.length > 0) {
+        sessionStorage.setItem('nama_cached_orders_v1', JSON.stringify(orders));
+      }
+    } catch (e) {
+      console.warn('SessionStorage orders sync error:', e);
+    }
+  }, [orders]);
+
   const knownOrderIdsRef = useRef<Set<string>>(new Set());
   const isInitialOrdersLoadedRef = useRef(false);
 
@@ -95,16 +188,26 @@ export default function App() {
     let unsubOrders: (() => void) | undefined;
     let unsubSettings: (() => void) | undefined;
 
+    // Register any cached orders right away to prevent replay alerts on load
+    if (orders.length > 0) {
+      orders.forEach(o => knownOrderIdsRef.current.add(o.id));
+    }
+
     async function loadData() {
-      await testFirestoreConnection();
+      testFirestoreConnection().catch(() => {});
       const [fetchedSettings, fetchedProducts, fetchedOrders] = await Promise.all([
         fetchStoreSettings(),
         fetchProducts(),
         fetchOrders(),
       ]);
       setSettings(fetchedSettings);
-      setProducts(fetchedProducts);
+      setProducts(fetchedProducts || []);
       setOrders(fetchedOrders);
+      try {
+        sessionStorage.setItem('nama_cached_orders_v1', JSON.stringify(fetchedOrders));
+      } catch (e) {
+        console.warn('SessionStorage cache write notice:', e);
+      }
 
       fetchedOrders.forEach(o => knownOrderIdsRef.current.add(o.id));
       isInitialOrdersLoadedRef.current = true;
@@ -126,6 +229,11 @@ export default function App() {
           liveOrders.forEach(o => knownOrderIdsRef.current.add(o.id));
         }
         setOrders(liveOrders);
+        try {
+          sessionStorage.setItem('nama_cached_orders_v1', JSON.stringify(liveOrders));
+        } catch (e) {
+          console.warn('SessionStorage live cache write notice:', e);
+        }
       });
       unsubSettings = subscribeToSettings((liveSettings) => {
         setSettings(liveSettings);
@@ -350,6 +458,50 @@ export default function App() {
         </div>
       )}
 
+      {/* Sticky Admin Quick Access Bar when authenticated */}
+      {isAdminLoggedIn && (
+        <aside aria-label="نوار ابزار مدیریت" className="bg-gradient-to-r from-emerald-950 via-[#1E2D20] to-[#231709] text-white px-3 sm:px-6 py-2 border-b border-emerald-700/60 shadow-md flex items-center justify-between text-xs sm:text-sm z-50 sticky top-0">
+          <div className="flex items-center gap-2">
+            <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-ping shrink-0" />
+            <span className="font-black text-amber-300">دسترسی مدیریت فعال است</span>
+            {adminUserEmail && (
+              <span className="hidden sm:inline text-emerald-200 text-xs font-mono">({adminUserEmail})</span>
+            )}
+            <span className="text-[11px] text-gray-300 hidden md:inline">
+              | شما هم‌اکنون در حال مشاهده ویترین اصلی فروشگاه مانند خریداران هستید
+            </span>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setIsAdminOpen(true)}
+              className="px-3 py-1.5 bg-amber-400 hover:bg-amber-300 active:scale-95 text-[#231709] font-black rounded-xl text-xs flex items-center gap-1.5 shadow-xs transition-all cursor-pointer"
+            >
+              <KeyRound className="w-3.5 h-3.5 text-[#231709]" />
+              <span>باز کردن پنل مدیریت</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                const token = sessionStorage.getItem('nama_admin_token');
+                if (token) {
+                  fetch('/api/admin/logout', {
+                    method: 'POST',
+                    headers: { 'Authorization': `Bearer ${token}` }
+                  }).catch(() => {});
+                }
+                sessionStorage.removeItem('nama_admin_token');
+                setIsAdminLoggedIn(false);
+                setAdminUserEmail(null);
+                showToast('از حساب مدیریت خارج شدید.');
+              }}
+              className="px-2.5 py-1 text-gray-300 hover:text-white hover:bg-white/10 rounded-lg text-xs transition-colors cursor-pointer"
+            >
+              خروج
+            </button>
+          </div>
+        </aside>
+      )}
+
       {/* Header */}
       <Header
         settings={settings}
@@ -357,9 +509,10 @@ export default function App() {
         isCartBumping={isCartBumping}
         onOpenCart={() => setIsCartOpen(true)}
         onOpenTracking={() => setIsTrackingOpen(true)}
-        onOpenAdmin={() => setIsAdminOpen(true)}
+        onOpenAdmin={handleOpenAdminTrigger}
         searchQuery={searchQuery}
         onSearchChange={setSearchQuery}
+        isAdminLoggedIn={isAdminLoggedIn}
       />
 
       {/* Hero Section */}
@@ -370,31 +523,14 @@ export default function App() {
         onScrollToCatalog={scrollToCatalog}
       />
 
-      {/* 1. Category Showcase Cards (دسته‌بندی‌های پرطرفدار) */}
+      {/* 1. Category Showcase Cards (Only rendered if multiple categories exist) */}
       <CategoryShowcase
         products={products}
         activeCategory={activeCategory}
         onSelectCategory={handleSelectCategory}
       />
 
-      {/* 2. Visual Promo Banners (Show only when products are added to store) */}
-      {products.length > 0 && (
-        <PromoBanners
-          settings={settings}
-          onSelectCategory={handleSelectCategory}
-        />
-      )}
-
-      {/* 3. Featured Products & New Arrivals (محصولات منتخب / آخرین محصولات اضافه شده) */}
-      {products.length > 0 && (
-        <FeaturedCollections
-          products={products}
-          onAddToCart={(p) => handleAddToCart(p, 1)}
-          onOpenDetails={(p) => setSelectedProduct(p)}
-        />
-      )}
-
-      {/* 4. Complete Catalog Section */}
+      {/* 2. Authentic Catalog Section */}
       <main id="catalog-section" className="flex-1 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 w-full">
         {/* Controls Bar */}
         <div className="flex flex-wrap items-center justify-between gap-3 mb-6 bg-white/90 p-4 rounded-3xl border border-[#E8DEC9] shadow-xs">
@@ -459,25 +595,17 @@ export default function App() {
               }
             </p>
             <div className="flex items-center justify-center gap-3">
-              {products.length === 0 ? (
-                <button
-                  onClick={() => setIsAdminOpen(true)}
-                  className="px-6 py-2.5 rounded-full bg-[#231709] hover:bg-[#150D05] text-white text-xs font-bold shadow-md transition-all flex items-center gap-2"
-                >
-                  <Plus className="w-4 h-4 text-amber-300" />
-                  <span>ورود به پنل و افزودن محصول جدید</span>
-                </button>
-              ) : (
-                <button
-                  onClick={() => {
-                    setActiveCategory('all');
-                    setSearchQuery('');
-                  }}
-                  className="px-5 py-2.5 rounded-full bg-[#231709] text-white text-xs font-bold shadow-md hover:bg-[#150D05] transition-all"
-                >
-                  مشاهده تمامی محصولات
-                </button>
-              )}
+              <button
+                onClick={async () => {
+                  setActiveCategory('all');
+                  setSearchQuery('');
+                  const fresh = await fetchProducts();
+                  if (fresh && fresh.length > 0) setProducts(fresh);
+                }}
+                className="px-6 py-2.5 rounded-full bg-[#231709] text-white text-xs font-bold shadow-md hover:bg-[#150D05] transition-all cursor-pointer"
+              >
+                مشاهده تمامی محصولات
+              </button>
             </div>
           </div>
         )}
@@ -488,7 +616,7 @@ export default function App() {
       <Footer
         settings={settings}
         onOpenTracking={() => setIsTrackingOpen(true)}
-        onOpenAdmin={() => setIsAdminOpen(true)}
+        onOpenAdmin={handleOpenAdminTrigger}
       />
 
       {/* Floating WhatsApp Quick Support Button */}
@@ -527,6 +655,13 @@ export default function App() {
         }}
       />
 
+      {/* Lightweight PIN Login Dialog (bypasses any OAuth or Google Auth) */}
+      <AdminLoginDialog
+        isOpen={isAdminLoginDialogOpen}
+        onClose={() => setIsAdminLoginDialogOpen(false)}
+        onSuccess={handleAdminLoginSuccess}
+      />
+
       <AdminModal
         isOpen={isAdminOpen}
         onClose={() => setIsAdminOpen(false)}
@@ -541,6 +676,10 @@ export default function App() {
         onClearAllProducts={handleClearAllProducts}
         onResetSampleProducts={handleResetSampleProducts}
         onUpdateSettings={handleUpdateSettings}
+        onAuthChange={(isAuth, email) => {
+          setIsAdminLoggedIn(isAuth);
+          setAdminUserEmail(email || null);
+        }}
       />
     </div>
   );

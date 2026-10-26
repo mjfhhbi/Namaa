@@ -24,7 +24,8 @@ import {
 } from '../src/server/testEnvironmentGuard';
 import { 
   processOrderCreation, 
-  CreateOrderParams 
+  CreateOrderParams,
+  _clearIdempotencyCache
 } from '../src/server/orderManager';
 
 // Color utilities for terminal output
@@ -368,6 +369,36 @@ async function runAllUnitTests() {
   );
   assert(receiptTest.status === 400 && receiptTest.success === false, 'Rejects receipt image exceeding 7MB limit');
 
+  // 3.9 Reject invalid payment method
+  const payMethodTest = await processOrderCreation(
+    { customerName: 'علی رضایی', customerPhone: '09123456789', address: 'تهران، آزادی', paymentMethod: 'unsupported_method' },
+    {},
+    null,
+    dummySettings,
+    mockPersist
+  );
+  assert(payMethodTest.status === 400 && payMethodTest.success === false, 'Rejects unsupported payment method');
+
+  // 3.10 Reject productId containing path traversal or slash
+  const slashProdTest = await processOrderCreation(
+    { customerName: 'علی رضایی', customerPhone: '09123456789', address: 'تهران، آزادی', items: [{ productId: '../secrets/key', quantity: 1 }] },
+    {},
+    null,
+    dummySettings,
+    mockPersist
+  );
+  assert(slashProdTest.status === 400 && slashProdTest.success === false, 'Rejects product ID containing path traversal or slashes');
+
+  // 3.11 Reject oversized discount code (> 32 chars)
+  const longCouponTest = await processOrderCreation(
+    { customerName: 'علی رضایی', customerPhone: '09123456789', address: 'تهران، آزادی', items: [{ productId: 'p1', quantity: 1 }], discountCode: 'A'.repeat(50) },
+    {},
+    null,
+    dummySettings,
+    mockPersist
+  );
+  assert(longCouponTest.status === 400 && longCouponTest.success === false, 'Rejects discount code exceeding 32 characters');
+
   // ===========================================================
   // SECTION 4: Fail-Secure Architecture (Null AdminDb Gate)
   // ===========================================================
@@ -567,6 +598,27 @@ async function runAllUnitTests() {
 
   const honeyAfterIdemp = (await mockDb.collection('products').doc('honey-01').get()).data()?.stock;
   assert(honeyBeforeIdemp === honeyAfterIdemp, 'Stock was NOT decremented a second time on duplicate request');
+
+  // 6.2 Persistent DB Idempotency across process restarts (empty memory cache)
+  _clearIdempotencyCache();
+  const dbIdempOrder = await processOrderCreation(
+    {
+      customerName: 'سارا احمدی',
+      customerPhone: '09121112233',
+      address: 'اصفهان، خیابان چهارباغ عباسی، کوچه مریم',
+      postalCode: '8146512345',
+      items: [{ productId: 'honey-01', quantity: 2 }],
+      idempotencyKey: 'test-key-001'
+    },
+    {},
+    mockDb,
+    storeSettings,
+    testPersist
+  );
+  assert(dbIdempOrder.success === true, 'Returns order via persistent database idempotency even when in-memory cache is wiped');
+  assert(dbIdempOrder.order?.id === order1.order?.id, 'Matches original order ID from database idempotency table');
+  const honeyAfterDbIdemp = (await mockDb.collection('products').doc('honey-01').get()).data()?.stock;
+  assert(honeyAfterDbIdemp === honeyBeforeIdemp, 'Stock remains unchanged after DB-level idempotency match');
 
   // ===========================================================
   // SECTION 7: Admin Security, Session Management & Tracking Access Control

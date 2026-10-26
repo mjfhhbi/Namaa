@@ -9,8 +9,11 @@ import {
   onSnapshot 
 } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../firebase';
-import { Product, Order, StoreSettings, OrderStatus } from '../types';
-import { DEFAULT_PRODUCTS, DEFAULT_SETTINGS, SAMPLE_ORDERS } from '../data/defaultProducts';
+import { Product, Order, StoreSettings, OrderStatus, DEFAULT_STORE_SETTINGS as DEFAULT_SETTINGS, AUTHENTIC_DEFAULT_PRODUCTS } from '../types';
+
+const DEFAULT_PRODUCTS: Product[] = AUTHENTIC_DEFAULT_PRODUCTS;
+const SAMPLE_ORDERS: Order[] = [];
+
 import { normalizeIranianPhone, isValidIranianMobile } from '../utils/phone';
 
 const LS_PRODUCTS_KEY = 'nama_store_products_v2';
@@ -87,20 +90,22 @@ export function getLocalProducts(): Product[] {
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed)) {
         const legacyMockIds = new Set(['prod-1','prod-2','prod-3','prod-4','prod-5','prod-6','prod-7','prod-8','prod-9','prod-10','prod-11','prod-12']);
-        return parsed.filter(
+        const valid = parsed.filter(
           (p: any) => p && p.id && !legacyMockIds.has(p.id)
         );
+        if (valid.length > 0) return valid;
       }
     }
   } catch (e) {
     console.error('Failed to read products from localStorage', e);
   }
-  return [];
+  return AUTHENTIC_DEFAULT_PRODUCTS;
 }
 
 export function saveLocalProducts(products: Product[]): void {
   try {
-    localStorage.setItem(LS_PRODUCTS_KEY, JSON.stringify(products));
+    const toSave = Array.isArray(products) ? products : [];
+    localStorage.setItem(LS_PRODUCTS_KEY, JSON.stringify(toSave));
     localStorage.setItem(LS_CATALOG_INIT_FLAG, 'true');
   } catch (e) {
     console.error('Failed to save products to localStorage', e);
@@ -145,8 +150,23 @@ export function extractPublicSettings(s: StoreSettings): Record<string, any> {
   return res;
 }
 
-// Fetch public settings from Firestore settings/public (accessible to all customers)
+// Fetch public settings from server & Firestore settings/public (accessible to all customers)
 export async function fetchStoreSettings(): Promise<StoreSettings> {
+  try {
+    const res = await fetch('/api/settings/public');
+    if (res.ok) {
+      const data = await res.json();
+      if (data?.success && data?.settings) {
+        const current = getLocalSettings();
+        const merged = { ...current, ...data.settings };
+        saveLocalSettings(merged);
+        return merged;
+      }
+    }
+  } catch (e) {
+    console.warn('Server public settings fetch notice:', e);
+  }
+
   const path = 'settings';
   try {
     const docRef = doc(db, path, 'public');
@@ -209,8 +229,22 @@ export async function updateStoreSettings(newSettings: StoreSettings): Promise<v
   }
 }
 
-// Fetch products from Firestore (zero mock products)
+// Fetch products from authoritative server storage & Firestore
 export async function fetchProducts(): Promise<Product[]> {
+  try {
+    const res = await fetch('/api/products');
+    if (res.ok) {
+      const data = await res.json();
+      if (data?.success && Array.isArray(data.products) && data.products.length > 0) {
+        saveLocalProducts(data.products);
+        return data.products;
+      }
+    }
+  } catch (e) {
+    console.warn('Server /api/products fetch notice:', e);
+  }
+
+  // Fallback to Firestore
   const path = 'products';
   try {
     const querySnapshot = await getDocs(collection(db, path));
@@ -218,23 +252,21 @@ export async function fetchProducts(): Promise<Product[]> {
       const list: Product[] = [];
       querySnapshot.forEach(docSnap => {
         const prod = docSnap.data() as Product;
-        // Purge old mock products (prod-1 to prod-12) if they were created earlier
-        if (prod.id && prod.id.startsWith('prod-') && ['prod-1','prod-2','prod-3','prod-4','prod-5','prod-6','prod-7','prod-8','prod-9','prod-10','prod-11','prod-12'].includes(prod.id)) {
-          deleteDoc(doc(db, path, prod.id)).catch(() => {});
-          return;
+        if (prod.id && !['prod-1','prod-2','prod-3','prod-4','prod-5','prod-6','prod-7','prod-8','prod-9','prod-10','prod-11','prod-12'].includes(prod.id)) {
+          list.push(prod);
         }
-        list.push(prod);
       });
-      saveLocalProducts(list);
-      return list;
-    } else {
-      saveLocalProducts([]);
-      return [];
+      if (list.length > 0) {
+        saveLocalProducts(list);
+        return list;
+      }
     }
   } catch (error) {
     console.warn('Firestore products fetch notice, using cached products:', error);
-    return getLocalProducts();
   }
+
+  const local = getLocalProducts();
+  return local && local.length > 0 ? local : AUTHENTIC_DEFAULT_PRODUCTS;
 }
 
 export function sanitizeForFirestore<T extends Record<string, any>>(obj: T): Record<string, any> {
@@ -358,6 +390,20 @@ export async function clearAllProducts(): Promise<void> {
 
 // Restore default sample products
 export async function resetSampleProducts(): Promise<Product[]> {
+  try {
+    const res = await fetch('/api/admin/products/reset-samples', {
+      method: 'POST',
+      headers: getAdminAuthHeaders()
+    });
+    if (res.ok) {
+      const data = await res.json();
+      if (data?.products) {
+        saveLocalProducts(data.products);
+        return data.products;
+      }
+    }
+  } catch (e) {}
+
   saveLocalProducts(DEFAULT_PRODUCTS);
   localStorage.setItem(LS_CATALOG_INIT_FLAG, 'true');
   const path = 'products';
@@ -714,45 +760,100 @@ export async function sendNtfyNotification(payload: NtfyPayload): Promise<{ succ
 
 export function subscribeToProducts(callback: (products: Product[]) => void): () => void {
   const path = 'products';
-  return onSnapshot(
-    collection(db, path),
-    (snapshot) => {
-      const list: Product[] = [];
-      snapshot.forEach((docSnap) => {
-        const prod = docSnap.data() as Product;
-        if (!['prod-1','prod-2','prod-3','prod-4','prod-5','prod-6','prod-7','prod-8','prod-9','prod-10','prod-11','prod-12'].includes(prod.id)) {
-          list.push(prod);
+  let unsubFirestore: (() => void) | null = null;
+  try {
+    unsubFirestore = onSnapshot(
+      collection(db, path),
+      (snapshot) => {
+        const list: Product[] = [];
+        snapshot.forEach((docSnap) => {
+          const prod = docSnap.data() as Product;
+          if (!['prod-1','prod-2','prod-3','prod-4','prod-5','prod-6','prod-7','prod-8','prod-9','prod-10','prod-11','prod-12'].includes(prod.id)) {
+            list.push(prod);
+          }
+        });
+        if (list.length > 0) {
+          saveLocalProducts(list);
+          callback(list);
         }
-      });
-      saveLocalProducts(list);
-      callback(list);
-    },
-    (error) => {
-      console.warn('Real-time products sync notice:', error);
-      callback(getLocalProducts());
-    }
-  );
-}
+      },
+      (error) => {
+        console.warn('Real-time products sync notice:', error);
+      }
+    );
+  } catch {}
 
+  // Active polling to /api/products every 3.5 seconds to guarantee cross-device instant sync
+  let lastProductsHash = '';
+  const pollTimer = setInterval(async () => {
+    try {
+      const res = await fetch('/api/products');
+      if (res.ok) {
+        const data = await res.json();
+        if (data?.success && Array.isArray(data.products)) {
+          const hash = JSON.stringify(data.products.map((p: any) => `${p.id}:${p.price}:${p.stock}:${p.updatedAt || ''}:${p.name}`));
+          if (hash !== lastProductsHash) {
+            lastProductsHash = hash;
+            saveLocalProducts(data.products);
+            callback(data.products);
+          }
+        }
+      }
+    } catch {}
+  }, 3500);
+
+  return () => {
+    if (unsubFirestore) unsubFirestore();
+    clearInterval(pollTimer);
+  };
+}
 
 export function subscribeToOrders(callback: (orders: Order[]) => void): () => void {
   const path = 'orders';
-  return onSnapshot(
-    collection(db, path),
-    (snapshot) => {
-      const list: Order[] = [];
-      snapshot.forEach((docSnap) => {
-        list.push(docSnap.data() as Order);
+  let unsubFirestore: (() => void) | null = null;
+  try {
+    unsubFirestore = onSnapshot(
+      collection(db, path),
+      (snapshot) => {
+        const list: Order[] = [];
+        snapshot.forEach((docSnap) => {
+          list.push(docSnap.data() as Order);
+        });
+        list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+        callback(list);
+      },
+      (error) => {
+        console.warn('Real-time orders sync notice:', error);
+      }
+    );
+  } catch {}
+
+  // Active polling for admin when logged in to immediately receive orders placed from customers' phones
+  let lastOrdersHash = '';
+  const pollTimer = setInterval(async () => {
+    const token = typeof window !== 'undefined' ? sessionStorage.getItem('nama_admin_token') : null;
+    if (!token) return;
+    try {
+      const res = await fetch('/api/admin/orders', {
+        headers: getAdminAuthHeaders()
       });
-      list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-      saveLocalOrders(list);
-      callback(list);
-    },
-    (error) => {
-      console.warn('Real-time orders sync notice:', error);
-      callback(getLocalOrders());
-    }
-  );
+      if (res.ok) {
+        const data = await res.json();
+        if (data?.success && Array.isArray(data.orders)) {
+          const hash = JSON.stringify(data.orders.map((o: any) => `${o.id}:${o.status}:${o.updatedAt || ''}`));
+          if (hash !== lastOrdersHash) {
+            lastOrdersHash = hash;
+            callback(data.orders);
+          }
+        }
+      }
+    } catch {}
+  }, 3500);
+
+  return () => {
+    if (unsubFirestore) unsubFirestore();
+    clearInterval(pollTimer);
+  };
 }
 
 export function subscribeToSettings(callback: (settings: StoreSettings) => void): () => void {

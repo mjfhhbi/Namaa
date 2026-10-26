@@ -58,6 +58,7 @@ export const Footer: React.FC<FooterProps> = ({
             <ul className="space-y-2 text-xs text-gray-300">
               <li>
                 <button
+                  type="button"
                   onClick={onOpenTracking}
                   className="hover:text-amber-300 transition-colors flex items-center gap-1.5"
                 >
@@ -67,11 +68,12 @@ export const Footer: React.FC<FooterProps> = ({
               </li>
               <li>
                 <button
+                  type="button"
                   onClick={onOpenAdmin}
-                  className="hover:text-amber-300 transition-colors flex items-center gap-1.5 text-gray-400 hover:text-gray-200"
+                  className="hover:text-amber-300 transition-colors flex items-center gap-1.5 text-gray-400 hover:text-gray-200 text-[11px]"
                 >
-                  <KeyRound className="w-3.5 h-3.5 text-amber-500" />
-                  <span>ورود به پنل مدیریت فروشگاه</span>
+                  <KeyRound className="w-3 h-3 text-amber-500" />
+                  <span>ورود مدیر</span>
                 </button>
               </li>
             </ul>
@@ -118,22 +120,42 @@ export const Footer: React.FC<FooterProps> = ({
           </div>
         </div>
 
-        {/* Bottom Copyright */}
-        <div className="pt-6 flex flex-col sm:flex-row items-center justify-between text-xs text-amber-100/60 gap-3 text-center sm:text-right">
-          <div className="flex items-center justify-center sm:justify-start gap-2">
-            <img 
-              src={namaLogoImg} 
-              alt="لوگو فروشگاه ناما" 
-              className="w-6 h-6 rounded-full object-cover border border-[#D4A340]/40 shrink-0 shadow-sm"
-              referrerPolicy="no-referrer"
-            />
-            <span>
-              © {new Date().getFullYear()} تمامی حقوق مادی و معنوی متعلق به فروشگاه مواد غذایی ناما (NAMA FOOD PRODUCTS) می‌باشد.
-            </span>
+        {/* Bottom Copyright & Distinctive Creator Signature */}
+        <div className="pt-8 border-t border-white/10 mt-6 flex flex-col items-center gap-5">
+          {/* Distinctive Prestigious Creator Plaque */}
+          <div className="relative group p-0.5 rounded-2xl bg-gradient-to-r from-amber-500/30 via-yellow-400/60 to-amber-500/30 shadow-lg shadow-black/50">
+            <div className="px-5 py-2.5 rounded-[14px] bg-gradient-to-r from-[#241607] via-[#2F1D0A] to-[#241607] border border-[#D4A340]/60 flex items-center gap-3.5 backdrop-blur-xs">
+              <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-amber-600 via-yellow-400 to-amber-300 flex items-center justify-center text-[#1C1207] font-black text-xs shadow-md shadow-amber-900/50">
+                <span>MJ</span>
+              </div>
+              <div className="text-right">
+                <span className="text-[10px] text-amber-200/90 font-medium block">
+                  طراحی، مهندسی و پیاده‌سازی اختصاصی وب‌سایت
+                </span>
+                <span className="text-sm font-black text-transparent bg-clip-text bg-gradient-to-r from-yellow-100 via-amber-300 to-yellow-200 drop-shadow-sm">
+                  متین جهانبانی
+                </span>
+              </div>
+            </div>
           </div>
-          <div className="flex items-center gap-1.5 font-bold text-[#D4A340]">
-            <span>از نام و جان برای طعمی ماندگار</span>
-            <span>🌿</span>
+
+          <div className="flex flex-col sm:flex-row items-center justify-between w-full text-xs text-amber-100/70 gap-3 text-center sm:text-right">
+            <div className="flex items-center justify-center sm:justify-start gap-2">
+              <img 
+                src={namaLogoImg} 
+                alt="لوگو فروشگاه ناما" 
+                className="w-5 h-5 rounded-full object-cover border border-[#D4A340]/40 shrink-0 shadow-sm"
+                referrerPolicy="no-referrer"
+              />
+              <span>
+                © {new Date().getFullYear()} تمامی حقوق متعلق به فروشگاه محصولات غذایی ناما (NAMA FOOD PRODUCTS) می‌باشد.
+              </span>
+            </div>
+
+            <div className="flex items-center gap-1.5 font-bold text-[#D4A340]">
+              <span>از نام و جان، برای طعمی ماندگار</span>
+              <span>🌿</span>
+            </div>
           </div>
         </div>
       </div>
