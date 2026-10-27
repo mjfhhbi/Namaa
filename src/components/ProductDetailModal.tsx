@@ -174,8 +174,15 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
                   <span className="text-xs text-[#5D6F61] font-semibold">تعداد:</span>
                   <div className="flex items-center border border-[#D5C6AC] rounded-full bg-white px-2 py-1 shadow-xs">
                     <button
-                      onClick={() => setQuantity(Math.min(product.stock, quantity + 1))}
-                      className="w-6 h-6 rounded-full hover:bg-gray-100 flex items-center justify-center text-[#163826]"
+                      type="button"
+                      disabled={quantity >= (product.stock || 0)}
+                      onClick={() => setQuantity(prev => Math.min(Math.max(1, product.stock || 1), prev + 1))}
+                      className={`w-6 h-6 rounded-full flex items-center justify-center transition-colors ${
+                        quantity >= (product.stock || 0)
+                          ? 'text-gray-300 cursor-not-allowed'
+                          : 'hover:bg-gray-100 text-[#163826] cursor-pointer'
+                      }`}
+                      title={quantity >= (product.stock || 0) ? 'سقف موجودی در انبار' : 'افزایش تعداد'}
                     >
                       <Plus className="w-3.5 h-3.5" />
                     </button>
@@ -183,8 +190,10 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
                       {quantity}
                     </span>
                     <button
-                      onClick={() => setQuantity(Math.max(1, quantity - 1))}
-                      className="w-6 h-6 rounded-full hover:bg-gray-100 flex items-center justify-center text-[#163826]"
+                      type="button"
+                      disabled={quantity <= 1}
+                      onClick={() => setQuantity(prev => Math.max(1, prev - 1))}
+                      className="w-6 h-6 rounded-full hover:bg-gray-100 flex items-center justify-center text-[#163826] disabled:text-gray-300 cursor-pointer disabled:cursor-not-allowed"
                     >
                       <Minus className="w-3.5 h-3.5" />
                     </button>

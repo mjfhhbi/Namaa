@@ -46,7 +46,13 @@ export const AdminLoginDialog: React.FC<AdminLoginDialogProps> = ({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const cleanPin = pin.trim();
+    const farsiDigits = ['۰', '۱', '۲', '۳', '۴', '۵', '۶', '۷', '۸', '۹'];
+    const arabicDigits = ['٠', '١', '٢', '٣', '٤', '٥', '٦', '٧', '٨', '٩'];
+    let normalized = pin.trim();
+    for (let i = 0; i < 10; i++) {
+      normalized = normalized.replaceAll(farsiDigits[i], String(i)).replaceAll(arabicDigits[i], String(i));
+    }
+    const cleanPin = normalized.trim();
     if (!cleanPin) {
       setErrorMessage('لطفاً رمز عبور مدیریت را وارد نمایید.');
       return;

@@ -4,7 +4,6 @@ import { StoreSettings } from '../types';
 import namaLogoImg from '../assets/images/nama_store_logo_1791976961130.webp';
 import { 
   PhoneCall, 
-  Send, 
   Instagram, 
   ShieldCheck, 
   Truck, 
@@ -24,9 +23,21 @@ export const Footer: React.FC<FooterProps> = ({
   onOpenAdmin,
 }) => {
   return (
-    <footer className="bg-[#1C1207] text-[#FAF7F0] border-t-4 border-[#D4A340] pt-14 pb-8">
+    <footer className="bg-[#170E04] text-[#FAF7F0] border-t-4 border-[#00828A] pt-14 pb-8 relative overflow-hidden">
+      {/* Decorative Persian Arches Motif Banner atop Footer */}
+      <div className="absolute top-0 inset-x-0 h-1.5 bg-gradient-to-r from-[#00828A] via-[#D4A340] to-[#00828A]" />
+
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="grid grid-cols-1 md:grid-cols-12 gap-8 pb-12 border-b border-white/10">
+        {/* Isfahan Architectural Silhouette Accent */}
+        <div className="flex items-center justify-center gap-1 opacity-25 mb-8 overflow-hidden pointer-events-none">
+          {[...Array(9)].map((_, i) => (
+            <svg key={i} className="w-8 h-6 text-[#D4A340]" viewBox="0 0 24 18" fill="none" stroke="currentColor" strokeWidth="1.5">
+              <path d="M2 18 L2 8 C2 4 10 1 12 0 C14 1 22 4 22 8 L22 18" />
+            </svg>
+          ))}
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-12 gap-8 pb-10 border-b border-white/10">
           
           {/* Brand & Slogan */}
           <div className="md:col-span-5 space-y-4 text-right">
@@ -60,7 +71,7 @@ export const Footer: React.FC<FooterProps> = ({
                 <button
                   type="button"
                   onClick={onOpenTracking}
-                  className="hover:text-amber-300 transition-colors flex items-center gap-1.5"
+                  className="hover:text-amber-300 transition-colors flex items-center gap-1.5 cursor-pointer"
                 >
                   <Truck className="w-3.5 h-3.5 text-emerald-400" />
                   <span>پیگیری مرسوله پستی با کد رهگیری</span>
@@ -70,7 +81,7 @@ export const Footer: React.FC<FooterProps> = ({
                 <button
                   type="button"
                   onClick={onOpenAdmin}
-                  className="hover:text-amber-300 transition-colors flex items-center gap-1.5 text-gray-400 hover:text-gray-200 text-[11px]"
+                  className="hover:text-amber-300 transition-colors flex items-center gap-1.5 text-gray-400 hover:text-gray-200 text-[11px] cursor-pointer"
                 >
                   <KeyRound className="w-3 h-3 text-amber-500" />
                   <span>ورود مدیر</span>
@@ -120,12 +131,12 @@ export const Footer: React.FC<FooterProps> = ({
           </div>
         </div>
 
-        {/* Bottom Copyright & Distinctive Creator Signature */}
-        <div className="pt-8 border-t border-white/10 mt-6 flex flex-col items-center gap-5">
-          {/* Distinctive Prestigious Creator Plaque */}
+        {/* Bottom Copyright & Creator Signature */}
+        <div className="pt-6 mt-4 flex flex-col items-center gap-4">
+          {/* Prestigious Creator Plaque */}
           <div className="relative group p-0.5 rounded-2xl bg-gradient-to-r from-amber-500/30 via-yellow-400/60 to-amber-500/30 shadow-lg shadow-black/50">
-            <div className="px-5 py-2.5 rounded-[14px] bg-gradient-to-r from-[#241607] via-[#2F1D0A] to-[#241607] border border-[#D4A340]/60 flex items-center gap-3.5 backdrop-blur-xs">
-              <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-amber-600 via-yellow-400 to-amber-300 flex items-center justify-center text-[#1C1207] font-black text-xs shadow-md shadow-amber-900/50">
+            <div className="px-5 py-2 rounded-[14px] bg-gradient-to-r from-[#241607] via-[#2F1D0A] to-[#241607] border border-[#D4A340]/60 flex items-center gap-3.5 backdrop-blur-xs">
+              <div className="w-7 h-7 rounded-full bg-gradient-to-tr from-amber-600 via-yellow-400 to-amber-300 flex items-center justify-center text-[#1C1207] font-black text-xs shadow-md shadow-amber-900/50">
                 <span>MJ</span>
               </div>
               <div className="text-right">

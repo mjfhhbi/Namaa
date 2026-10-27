@@ -130,13 +130,22 @@ export function verifyAdminPin(pin: string, clientIp: string): { success: boolea
     return { success: false, status: 400, error: 'رمز عبور مدیریت الزامی و حداکثر ۳۲ کاراکتر است.' };
   }
 
-  const computedHash = hashPin(pin, state.pinSalt!);
+  // Support both Persian (۰-۹) and English (0-9) digits
+  const farsiDigits = ['۰', '۱', '۲', '۳', '۴', '۵', '۶', '۷', '۸', '۹'];
+  const arabicDigits = ['٠', '١', '٢', '٣', '٤', '٥', '٦', '٧', '٨', '٩'];
+  let normalizedPin = pin.trim();
+  for (let i = 0; i < 10; i++) {
+    normalizedPin = normalizedPin.replaceAll(farsiDigits[i], String(i)).replaceAll(arabicDigits[i], String(i));
+  }
+
+  const computedHashRaw = hashPin(pin.trim(), state.pinSalt!);
+  const computedHashNorm = hashPin(normalizedPin, state.pinSalt!);
   let isMatch = false;
   try {
-    isMatch = crypto.timingSafeEqual(
-      Buffer.from(computedHash, 'hex'),
-      Buffer.from(state.pinHash!, 'hex')
-    );
+    const targetBuf = Buffer.from(state.pinHash!, 'hex');
+    const matchRaw = crypto.timingSafeEqual(Buffer.from(computedHashRaw, 'hex'), targetBuf);
+    const matchNorm = crypto.timingSafeEqual(Buffer.from(computedHashNorm, 'hex'), targetBuf);
+    isMatch = matchRaw || matchNorm;
   } catch {
     isMatch = false;
   }

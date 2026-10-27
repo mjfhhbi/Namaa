@@ -25,7 +25,6 @@ import {
   subscribeToSettings
 } from './services/storeService';
 import { testFirestoreConnection, auth, onAuthStateChanged, signOut } from './firebase';
-import { playNewOrderChime } from './utils/audioAlert';
 import { Header } from './components/Header';
 import { Hero } from './components/Hero';
 import { CategoryShowcase } from './components/CategoryShowcase';
@@ -126,7 +125,7 @@ export default function App() {
   };
 
   // پس از لود شدن کامل صفحه، اگر پارامترهای اضافی مثل ?admin=true یا مسیر /admin در URL وجود داشت،
-  // دیالوگ یا پنل مدیریت باز شده و پارامترهای اضافی فوراً از نوار آدرس مرورگر پاک می‌شوند تا امنیت و زیبایی ظاهری سایت حفظ شود
+  // آن‌ها را بی‌صدا از نوار آدرس مرورگر پاک می‌کنیم تا همیشه ویترین تمیز فروشگاه برای مشتریان نمایش داده شود و هیچ دیالوگ یا پاپ‌آپی خودکار باز نشود
   useEffect(() => {
     try {
       if (typeof window !== 'undefined') {
@@ -136,14 +135,7 @@ export default function App() {
         const isHashAdmin = url.hash === '#admin';
 
         if (hasAdminParam || isPathAdmin || isHashAdmin) {
-          const token = sessionStorage.getItem('nama_admin_token');
-          if (token) {
-            setIsAdminOpen(true);
-          } else {
-            setIsAdminLoginDialogOpen(true);
-          }
-
-          // پاکسازی فوری پارامترهای اضافه از URL مرورگر با حفظ زیبایی و امنیت
+          // پاکسازی کامل بدون باز کردن هیچ پنجره یا دیالوگی
           url.searchParams.delete('admin');
           const cleanPath = isPathAdmin ? '/' : url.pathname;
           const cleanSearch = url.searchParams.toString() ? `?${url.searchParams.toString()}` : '';
@@ -220,7 +212,6 @@ export default function App() {
         if (isInitialOrdersLoadedRef.current) {
           const incomingNew = liveOrders.filter(o => !knownOrderIdsRef.current.has(o.id));
           if (incomingNew.length > 0) {
-            playNewOrderChime();
             const latest = incomingNew[0];
             showToast(`🔔 سفارش جدید ثبت شد! (${latest.customerName} - ${latest.totalAmount.toLocaleString('fa-IR')} تومان)`);
             incomingNew.forEach(o => knownOrderIdsRef.current.add(o.id));
@@ -256,27 +247,56 @@ export default function App() {
     }, 3000);
   };
 
-  // Cart operations
+  // Cart operations with strict stock enforcement
   const handleAddToCart = (product: Product, quantity: number = 1) => {
+    // Check authoritative product stock from products state
+    const currentProd = products.find(p => p.id === product.id) || product;
+    const currentStock = Math.max(0, Number(currentProd.stock ?? 0));
+
+    if (currentStock <= 0) {
+      showToast(`محصول «${product.name}» در حال حاضر ناموجود است.`);
+      return;
+    }
+
+    let reachedMax = false;
+    let actualAdded = 0;
+
+    setCart(prev => {
+      const index = prev.findIndex(item => item.product.id === product.id);
+      if (index >= 0) {
+        const currentInCart = prev[index].quantity;
+        const remainingStock = Math.max(0, currentStock - currentInCart);
+        if (remainingStock <= 0) {
+          reachedMax = true;
+          return prev;
+        }
+        const qtyToAdd = Math.min(quantity, remainingStock);
+        actualAdded = qtyToAdd;
+        const updated = [...prev];
+        updated[index] = {
+          ...updated[index],
+          product: { ...currentProd, stock: currentStock },
+          quantity: currentInCart + qtyToAdd,
+        };
+        return updated;
+      } else {
+        const qtyToAdd = Math.min(quantity, currentStock);
+        actualAdded = qtyToAdd;
+        return [...prev, { product: { ...currentProd, stock: currentStock }, quantity: qtyToAdd }];
+      }
+    });
+
+    if (reachedMax) {
+      showToast(`حداکثر موجودی این محصول در انبار (${currentStock} عدد) به سبد خرید اضافه شده است.`);
+      return;
+    }
+
     setIsCartBumping(true);
     setTimeout(() => {
       setIsCartBumping(false);
     }, 800);
 
-    setCart(prev => {
-      const index = prev.findIndex(item => item.product.id === product.id);
-      if (index >= 0) {
-        const updated = [...prev];
-        updated[index] = {
-          ...updated[index],
-          quantity: updated[index].quantity + quantity,
-        };
-        return updated;
-      } else {
-        return [...prev, { product, quantity }];
-      }
-    });
-    showToast(`«${product.name}» به سبد خرید اضافه شد.`);
+    showToast(`«${product.name}» (${actualAdded} عدد) به سبد خرید اضافه شد.`);
   };
 
   const handleUpdateQuantity = (productId: string, quantity: number) => {
@@ -284,8 +304,25 @@ export default function App() {
       handleRemoveFromCart(productId);
       return;
     }
+    const currentProd = products.find(p => p.id === productId);
+    const currentStock = currentProd ? Math.max(0, Number(currentProd.stock ?? 0)) : 999;
+
+    if (quantity > currentStock) {
+      showToast(`حداکثر موجودی این محصول در انبار (${currentStock} عدد) است.`);
+    }
+
+    const safeQty = Math.min(quantity, currentStock);
+    if (safeQty <= 0) {
+      handleRemoveFromCart(productId);
+      showToast('محصول به دلیل اتمام موجودی از سبد خرید حذف شد.');
+      return;
+    }
+
     setCart(prev => 
-      prev.map(item => item.product.id === productId ? { ...item, quantity } : item)
+      prev.map(item => item.product.id === productId 
+        ? { ...item, quantity: safeQty, product: currentProd ? { ...item.product, stock: currentStock } : item.product } 
+        : item
+      )
     );
   };
 
@@ -450,6 +487,7 @@ export default function App() {
 
   return (
     <div className="min-h-screen flex flex-col bg-[#FAF7F0] text-[#231709] w-full max-w-full overflow-x-hidden relative">
+
       {/* Toast Alert */}
       {toastMessage && (
         <div className="fixed bottom-6 right-6 z-50 bg-[#231709] text-[#FAF7F0] px-4 py-3 rounded-2xl shadow-xl border border-[#D4A340]/60 flex items-center gap-2.5 text-xs sm:text-sm font-bold animate-in fade-in slide-in-from-bottom-4 duration-200">

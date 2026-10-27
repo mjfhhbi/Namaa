@@ -876,14 +876,24 @@ app.post('/api/admin/products/save', requireAdminAuth, async (req, res) => {
     if (!product || !product.id || !product.name || product.price === undefined) {
       return res.status(400).json({ error: 'اطلاعات محصول ناقص است.' });
     }
-    const priceNum = Number(product.price);
-    if (isNaN(priceNum) || priceNum < 0) {
-      return res.status(400).json({ error: 'قیمت محصول باید یک عدد نامنفی باشد.' });
+    const cleanNum = (v: any): number => {
+      if (v === undefined || v === null || v === '') return 0;
+      let s = String(v);
+      const farsiDigits = ['۰', '۱', '۲', '۳', '۴', '۵', '۶', '۷', '۸', '۹'];
+      const arabicDigits = ['٠', '١', '٢', '٣', '٤', '٥', '٦', '٧', '٨', '٩'];
+      for (let i = 0; i < 10; i++) {
+        s = s.replaceAll(farsiDigits[i], String(i)).replaceAll(arabicDigits[i], String(i));
+      }
+      s = s.replace(/[^0-9.]/g, '');
+      const parsed = parseFloat(s);
+      return isNaN(parsed) ? 0 : parsed;
+    };
+
+    const priceNum = cleanNum(product.price);
+    if (priceNum <= 0) {
+      return res.status(400).json({ error: 'قیمت محصول باید یک عدد نامنفی و معتبر باشد.' });
     }
-    const stockNum = Number(product.stock ?? 10);
-    if (isNaN(stockNum) || stockNum < 0 || !Number.isInteger(stockNum)) {
-      return res.status(400).json({ error: 'موجودی انبار باید یک عدد صحیح نامنفی باشد.' });
-    }
+    const stockNum = Math.max(0, Math.floor(cleanNum(product.stock !== undefined ? product.stock : 10)));
     const cleanProduct: Record<string, any> = {
       ...product,
       price: priceNum,
@@ -1160,11 +1170,22 @@ async function setupServer() {
   const distPath = path.join(process.cwd(), 'dist');
 
   if (isProduction) {
-    // Serve production static files from dist directory
-    app.use(express.static(distPath));
+    // Serve production static files from dist directory with HTML cache-busting
+    app.use(express.static(distPath, {
+      setHeaders: (res, filePath) => {
+        if (filePath.endsWith('.html')) {
+          res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0');
+          res.setHeader('Pragma', 'no-cache');
+          res.setHeader('Expires', '0');
+        }
+      }
+    }));
 
-    // Handle SPA routing: serve index.html for all remaining routes
+    // Handle SPA routing: serve index.html with strict zero-cache policy
     app.get('*', (_req, res) => {
+      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0');
+      res.setHeader('Pragma', 'no-cache');
+      res.setHeader('Expires', '0');
       res.sendFile(path.join(distPath, 'index.html'));
     });
   } else {
@@ -1179,6 +1200,7 @@ async function setupServer() {
     } catch {
       app.use(express.static(distPath));
       app.get('*', (_req, res) => {
+        res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0');
         res.sendFile(path.join(distPath, 'index.html'));
       });
     }

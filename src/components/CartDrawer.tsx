@@ -135,8 +135,15 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
 
                   <div className="flex items-center border border-[#D5C6AC] rounded-full bg-[#FAF8F3] px-1.5 py-0.5">
                     <button
-                      onClick={() => onUpdateQuantity(product.id, Math.min(product.stock, quantity + 1))}
-                      className="w-5 h-5 flex items-center justify-center text-[#163826] hover:bg-gray-200 rounded-full"
+                      type="button"
+                      onClick={() => onUpdateQuantity(product.id, quantity + 1)}
+                      disabled={quantity >= (product.stock ?? 1)}
+                      className={`w-5 h-5 flex items-center justify-center rounded-full transition-colors ${
+                        quantity >= (product.stock ?? 1)
+                          ? 'text-gray-300 cursor-not-allowed'
+                          : 'text-[#163826] hover:bg-gray-200 cursor-pointer'
+                      }`}
+                      title={quantity >= (product.stock ?? 1) ? 'حداکثر موجودی در انبار' : 'افزایش تعداد'}
                     >
                       <Plus className="w-3 h-3" />
                     </button>

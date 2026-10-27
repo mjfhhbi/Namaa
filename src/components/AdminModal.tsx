@@ -53,7 +53,7 @@ import { sendNtfyNotification, fetchAdminSettings } from '../services/storeServi
 import { DEFAULT_STORE_SETTINGS as DEFAULT_SETTINGS, PRESET_PRODUCT_IMAGES as PRESET_IMAGE_OPTIONS } from '../types';
 import { compressImage } from '../utils/imageCompressor';
 import { doc, setDoc } from 'firebase/firestore';
-import { db, auth, googleProvider, signInWithPopup, signOut, onAuthStateChanged, User } from '../firebase';
+import { db } from '../firebase';
 
 interface AdminModalProps {
   isOpen: boolean;
@@ -172,8 +172,8 @@ export const AdminModal: React.FC<AdminModalProps> = ({
   const [orderStatusFilter, setOrderStatusFilter] = useState<'all' | OrderStatus>('all');
   const [orderSearchQuery, setOrderSearchQuery] = useState('');
 
-  // Product Edit/Create State
-  const [editingProduct, setEditingProduct] = useState<Partial<Product> | null>(null);
+  // Product Edit/Create State (allows flexible string/number formatting during typing)
+  const [editingProduct, setEditingProduct] = useState<(Omit<Partial<Product>, 'price' | 'originalPrice' | 'stock'> & { price?: any; originalPrice?: any; stock?: any }) | null>(null);
   const [isNewProduct, setIsNewProduct] = useState(false);
   const [productSearch, setProductSearch] = useState('');
   const [productCategoryFilter, setProductCategoryFilter] = useState<string>('all');
@@ -472,6 +472,21 @@ export const AdminModal: React.FC<AdminModalProps> = ({
     onUpdateSettings(newSettings);
   };
 
+  // Robust Persian & formatted number parser
+  const parseCleanNumber = (val: any): number => {
+    if (val === undefined || val === null || val === '') return 0;
+    const str = String(val);
+    const farsiDigits = ['۰', '۱', '۲', '۳', '۴', '۵', '۶', '۷', '۸', '۹'];
+    const arabicDigits = ['٠', '١', '٢', '٣', '٤', '٥', '٦', '٧', '٨', '٩'];
+    let clean = str;
+    for (let i = 0; i < 10; i++) {
+      clean = clean.replaceAll(farsiDigits[i], String(i)).replaceAll(arabicDigits[i], String(i));
+    }
+    clean = clean.replace(/[^0-9.]/g, '');
+    const num = parseFloat(clean);
+    return isNaN(num) ? 0 : num;
+  };
+
   // Product Submit
   const handleProductSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -480,11 +495,13 @@ export const AdminModal: React.FC<AdminModalProps> = ({
       setProductFormError('نام محصول الزامی است');
       return;
     }
-    const parsedPrice = Number(editingProduct.price);
-    if (isNaN(parsedPrice) || parsedPrice <= 0) {
+    const parsedPrice = parseCleanNumber(editingProduct.price);
+    if (parsedPrice <= 0) {
       setProductFormError('لطفاً یک قیمت معتبر (بزرگتر از صفر) به تومان وارد فرمایید');
       return;
     }
+    const parsedStock = Math.max(0, Math.floor(parseCleanNumber(editingProduct.stock !== undefined ? editingProduct.stock : 10)));
+    const parsedOriginalPrice = editingProduct.originalPrice ? parseCleanNumber(editingProduct.originalPrice) : undefined;
 
     let chosenCategory = (editingProduct.category || '').trim();
     if (!chosenCategory) {
@@ -513,9 +530,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
       category: chosenCategory,
       categoryLabel: categoryLabel,
       price: parsedPrice,
-      ...(editingProduct.originalPrice && Number(editingProduct.originalPrice) > 0 
-          ? { originalPrice: Number(editingProduct.originalPrice) } 
-          : {}),
+      ...(parsedOriginalPrice && parsedOriginalPrice > 0 ? { originalPrice: parsedOriginalPrice } : {}),
       weight: editingProduct.weight?.trim() || 'بسته استاندارد',
       shortDesc: editingProduct.shortDesc?.trim() || '',
       description: editingProduct.description?.trim() || '',
@@ -523,7 +538,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
         ? editingProduct.benefits 
         : (typeof editingProduct.benefits === 'string' ? (editingProduct.benefits as string).split('\n').map(s => s.trim()).filter(Boolean) : []),
       origin: editingProduct.origin?.trim() || 'ایران',
-      stock: Number(editingProduct.stock ?? 10),
+      stock: parsedStock,
       image: editingProduct.image || PRESET_IMAGE_OPTIONS[0].url,
       isPopular: !!editingProduct.isPopular,
       isOrganic: !!editingProduct.isOrganic,
@@ -652,7 +667,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
     }
   };
 
-  if (!isOpen) return null;
+  if (!isOpen || !isAuthenticated) return null;
 
   return (
     <div 
@@ -730,73 +745,8 @@ export const AdminModal: React.FC<AdminModalProps> = ({
           </div>
         </div>
 
-        {/* LOGIN SCREEN */}
-        {!isAuthenticated ? (
-          <div className="p-4 sm:p-8 text-center max-w-md mx-auto my-auto space-y-4 animate-in fade-in w-full">
-            <div className="w-14 h-14 sm:w-16 sm:h-16 rounded-3xl bg-[#FAF3E3] border border-[#E3CE9B] flex items-center justify-center text-[#231709] mx-auto shadow-sm">
-              <Lock className="w-7 h-7 sm:w-8 sm:h-8 text-[#231709]" />
-            </div>
-
-            <div>
-              <h4 className="text-base sm:text-lg font-black text-[#231709]">ورود امن به پنل مدیریت</h4>
-              <p className="text-xs text-[#6A5A4A] mt-1">
-                دسترسی به سفارشات، تغییر قیمت‌ها و مدیریت محصولات ناما
-              </p>
-            </div>
-
-            {/* Secure Admin PIN Authentication Form */}
-            <form onSubmit={(e) => handlePinLogin(e)} className="space-y-3 pt-1">
-              <div className="space-y-1.5 text-right">
-                <label className="text-xs font-bold text-[#4A3B2C] block">
-                  رمز عبور مدیریت:
-                </label>
-                <input
-                  type="password"
-                  dir="ltr"
-                  autoComplete="current-password"
-                  value={passwordInput}
-                  onChange={(e) => setPasswordInput(e.target.value)}
-                  placeholder="••••••••"
-                  className="w-full bg-white border border-[#D5C6AC] rounded-2xl px-4 py-3 text-center text-lg font-mono tracking-widest text-[#231709] focus:outline-none focus:ring-2 focus:ring-[#D4A340] placeholder:tracking-normal placeholder:text-sm"
-                />
-              </div>
-
-              {loginError && (
-                <div className="text-xs text-red-700 font-bold bg-red-50 p-2.5 rounded-xl border border-red-200 text-right">
-                  رمز عبور مدیریت نادرست است. لطفاً مجدداً بررسی فرمایید.
-                </div>
-              )}
-
-              <button
-                type="submit"
-                disabled={isLoggingInPin || !passwordInput.trim()}
-                className="w-full py-3 rounded-2xl bg-[#231709] hover:bg-[#150D05] active:scale-95 text-white font-black text-xs sm:text-sm shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
-              >
-                <Unlock className="w-4 h-4 text-[#D4A340]" />
-                <span>{isLoggingInPin ? 'در حال تایید اعتبار...' : 'ورود به پنل مدیریت'}</span>
-              </button>
-            </form>
-
-            <div className="p-2.5 bg-emerald-50/70 border border-emerald-200/80 rounded-2xl text-[11px] text-emerald-900 text-right leading-relaxed flex items-center gap-2">
-              <ShieldCheck className="w-4 h-4 text-emerald-700 flex-shrink-0" />
-              <span>
-                <strong>ورود امن مدیریت:</strong> دسترسی به سفارشات و مدیریت با ورود رمز عبور معتبر.
-              </span>
-            </div>
-
-            <button
-              type="button"
-              onClick={(e) => { e.preventDefault(); e.stopPropagation(); onClose(); }}
-              onTouchEnd={(e) => { e.preventDefault(); e.stopPropagation(); onClose(); }}
-              className="w-full py-3 rounded-2xl bg-[#EDE4D4] hover:bg-[#E2D6C0] active:scale-95 text-[#231709] font-black text-xs sm:text-sm flex items-center justify-center gap-2 transition-all cursor-pointer border border-[#D8CBB2] shadow-xs"
-            >
-              <Store className="w-4 h-4 text-[#A47922]" />
-              <span>مشاهده و خرید در صفحه اصلی فروشگاه</span>
-            </button>
-          </div>
-        ) : (
-          /* AUTHENTICATED ADMIN PANEL */
-          <div className="flex-1 flex flex-col overflow-hidden">
+        {/* AUTHENTICATED ADMIN PANEL */}
+        <div className="flex-1 flex flex-col overflow-hidden">
             {/* Nav Tabs */}
             <div className="bg-[#FAF8F3] border-b border-[#E8DEC9] px-3 sm:px-4 flex items-center gap-1.5 overflow-x-auto scrollbar-none">
               <button
@@ -1677,33 +1627,37 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                           <div>
                             <label className="block text-xs font-bold text-gray-700 mb-1">قیمت فروش (تومان) *</label>
                             <input
-                              type="number"
+                              type="text"
+                              dir="ltr"
                               value={editingProduct.price !== undefined && editingProduct.price !== null ? editingProduct.price : ''}
-                              onChange={(e) => setEditingProduct({ ...editingProduct, price: e.target.value === '' ? ('' as any) : Number(e.target.value) })}
-                              className="w-full bg-[#FAF8F3] border rounded-xl px-3 py-2 text-base sm:text-xs font-bold"
+                              onChange={(e) => setEditingProduct({ ...editingProduct, price: e.target.value })}
+                              className="w-full bg-[#FAF8F3] border rounded-xl px-3 py-2 text-base sm:text-xs font-bold font-mono"
                               required
-                              placeholder="مثلاً: ۱۵۰،۰۰۰"
+                              placeholder="مثلاً: ۱۵۰،۰۰۰ یا 150000"
                             />
                           </div>
 
                           <div>
                             <label className="block text-xs font-bold text-gray-700 mb-1">قیمت اولیه / خط خورده (تومان)</label>
                             <input
-                              type="number"
+                              type="text"
+                              dir="ltr"
                               value={editingProduct.originalPrice || ''}
-                              onChange={(e) => setEditingProduct({ ...editingProduct, originalPrice: e.target.value ? Number(e.target.value) : undefined })}
+                              onChange={(e) => setEditingProduct({ ...editingProduct, originalPrice: e.target.value })}
                               placeholder="جهت نمایش تخفیف"
-                              className="w-full bg-[#FAF8F3] border rounded-xl px-3 py-2 text-base sm:text-xs"
+                              className="w-full bg-[#FAF8F3] border rounded-xl px-3 py-2 text-base sm:text-xs font-mono"
                             />
                           </div>
 
                           <div>
                             <label className="block text-xs font-bold text-gray-700 mb-1">موجودی انبار (تعداد)</label>
                             <input
-                              type="number"
-                              value={editingProduct.stock ?? 10}
-                              onChange={(e) => setEditingProduct({ ...editingProduct, stock: Number(e.target.value) })}
-                              className="w-full bg-[#FAF8F3] border rounded-xl px-3 py-2 text-base sm:text-xs font-bold"
+                              type="text"
+                              dir="ltr"
+                              value={editingProduct.stock !== undefined && editingProduct.stock !== null ? editingProduct.stock : 10}
+                              onChange={(e) => setEditingProduct({ ...editingProduct, stock: e.target.value })}
+                              className="w-full bg-[#FAF8F3] border rounded-xl px-3 py-2 text-base sm:text-xs font-bold font-mono"
+                              placeholder="مثلاً: 20"
                             />
                           </div>
 
@@ -3250,7 +3204,6 @@ export const AdminModal: React.FC<AdminModalProps> = ({
               </button>
             </div>
           </div>
-        )}
 
         {/* EDIT CATEGORY MODAL (Part of Category CRUD) */}
         {editingCategoryModal && (

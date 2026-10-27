@@ -78,7 +78,14 @@ export const OrderTrackingModal: React.FC<OrderTrackingModalProps> = ({
   const [lateError, setLateError] = useState<string | null>(null);
   const [isCompressingLate, setIsCompressingLate] = useState(false);
 
-  if (!isOpen) return null;
+  React.useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, onClose]);
 
   const handleSearch = async (orderIdToSearch?: string, phoneToSearch?: string) => {
     let rawId = (orderIdToSearch !== undefined ? orderIdToSearch : query).trim();
@@ -208,14 +215,7 @@ export const OrderTrackingModal: React.FC<OrderTrackingModalProps> = ({
 
   const activeStepIdx = order ? getStepIndex(order.status) : 0;
 
-  React.useEffect(() => {
-    if (!isOpen) return;
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, onClose]);
+  if (!isOpen) return null;
 
   return (
     <div 
