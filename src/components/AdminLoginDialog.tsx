@@ -5,12 +5,16 @@ interface AdminLoginDialogProps {
   isOpen: boolean;
   onClose: () => void;
   onSuccess: (token: string) => void;
+  mode?: 'modal' | 'page';
+  onReturnToStore?: () => void;
 }
 
 export const AdminLoginDialog: React.FC<AdminLoginDialogProps> = ({
   isOpen,
   onClose,
   onSuccess,
+  mode = 'modal',
+  onReturnToStore,
 }) => {
   const [pin, setPin] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -83,6 +87,89 @@ export const AdminLoginDialog: React.FC<AdminLoginDialogProps> = ({
     }
   };
 
+  if (mode === 'page') {
+    return (
+      <div className="min-h-screen bg-[#FAF7F0] flex flex-col items-center justify-center p-4 text-right">
+        <div className="w-full max-w-sm bg-[#FAF8F3] rounded-3xl shadow-xl border border-[#E4D7C2] p-6 text-right animate-in fade-in zoom-in-95 duration-200">
+          {/* Lock Icon */}
+          <div className="w-14 h-14 rounded-2xl bg-[#EDE4D4] border border-[#D8CBB2] flex items-center justify-center text-[#231709] mx-auto mb-3 shadow-xs">
+            <Lock className="w-7 h-7 text-[#231709]" />
+          </div>
+
+          {/* Header */}
+          <div className="text-center space-y-1 mb-5">
+            <h3 className="text-lg font-black text-[#231709]">
+              ورود امن به پنل مدیریت
+            </h3>
+            <p className="text-xs text-[#6A5A4A]">
+              دسترسی به سفارشات، موجودی و کاتالوگ فروشگاه
+            </p>
+          </div>
+
+          {/* Direct PIN Form */}
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div className="space-y-1.5 text-right">
+              <label className="text-xs font-bold text-[#4B3B2B] block">
+                رمز عبور مدیریت:
+              </label>
+              <div className="relative">
+                <input
+                  ref={inputRef}
+                  type={showPassword ? 'text' : 'password'}
+                  dir="ltr"
+                  value={pin}
+                  onChange={(e) => setPin(e.target.value)}
+                  placeholder="••••••••"
+                  autoComplete="current-password"
+                  className="w-full bg-white border border-[#D5C6AC] rounded-2xl px-4 py-2.5 text-center text-lg font-mono tracking-widest text-[#231709] focus:outline-none focus:ring-2 focus:ring-[#D4A340] placeholder:tracking-normal placeholder:text-sm pl-10"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute left-3 top-1/2 -translate-y-1/2 text-[#8C7E70] hover:text-[#231709] transition-colors cursor-pointer"
+                  title={showPassword ? 'مخفی‌سازی رمز' : 'نمایش رمز'}
+                >
+                  {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
+            </div>
+
+            {errorMessage && (
+              <div className="p-2.5 bg-red-50 border border-red-200 text-red-700 text-xs font-bold rounded-2xl flex items-center gap-2 text-right animate-in fade-in">
+                <AlertCircle className="w-4 h-4 text-red-600 shrink-0" />
+                <span>{errorMessage}</span>
+              </div>
+            )}
+
+            <button
+              type="submit"
+              disabled={isLoading || !pin.trim()}
+              className="w-full py-3 rounded-2xl bg-[#231709] hover:bg-[#150D05] active:scale-95 text-white font-black text-sm shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+            >
+              <Unlock className="w-4 h-4 text-[#D4A340]" />
+              <span>{isLoading ? 'در حال تایید اعتبار...' : 'ورود به پنل مدیریت'}</span>
+            </button>
+          </form>
+
+          {/* Return to store button */}
+          <button
+            type="button"
+            onClick={onReturnToStore || onClose}
+            className="mt-3 w-full py-2.5 rounded-2xl bg-[#EBE3D3] hover:bg-[#E0D5C1] active:scale-95 text-[#231709] text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+          >
+            <span>← بازگشت به فروشگاه عمومی</span>
+          </button>
+
+          {/* Security Badge */}
+          <div className="mt-4 pt-3 border-t border-[#EDE4D4] flex items-center justify-center gap-1.5 text-[11px] text-[#6A5A4A]">
+            <ShieldCheck className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+            <span>احراز هویت سروری امن و بدون نیاز به حساب‌های خارجی</span>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div
       className="fixed inset-0 z-50 overflow-y-auto bg-black/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4"
@@ -95,7 +182,7 @@ export const AdminLoginDialog: React.FC<AdminLoginDialogProps> = ({
         {/* Close Button */}
         <button
           type="button"
-          onClick={onClose}
+          onClick={onReturnToStore || onClose}
           className="absolute top-4 left-4 w-9 h-9 rounded-full bg-black/5 hover:bg-black/10 active:scale-95 flex items-center justify-center text-[#4B3B2B] transition-colors cursor-pointer"
           title="بستن"
           aria-label="بستن"

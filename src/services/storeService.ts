@@ -39,21 +39,21 @@ export function getLocalSettings(): StoreSettings {
       }
       parsed.supportTelegram = undefined;
 
-      // If categories still contain old honey/dates mock items
+      // If categories still contain old honey/dates/saffron mock items
       if (Array.isArray(parsed.customCategories)) {
         parsed.customCategories = parsed.customCategories.filter(
-          (c: any) => c.id !== 'honey' && c.id !== 'dates' && !c.name?.includes('عسل') && !c.name?.includes('خرما')
+          (c: any) => c.id !== 'honey' && c.id !== 'dates' && c.id !== 'saffron' && !c.name?.includes('عسل') && !c.name?.includes('خرما') && !c.name?.includes('زعفران')
         );
       }
       if (!parsed.customCategories) {
         parsed.customCategories = [];
       }
 
-      // Sanitize subtitle texts if they contain legacy honey/dates references
-      if (parsed.heroSubtitle && (parsed.heroSubtitle.includes('عسل') || parsed.heroSubtitle.includes('خرما'))) {
+      // Sanitize subtitle texts if they contain legacy honey/dates/saffron references
+      if (parsed.heroSubtitle && (parsed.heroSubtitle.includes('عسل') || parsed.heroSubtitle.includes('خرما') || parsed.heroSubtitle.includes('زعفران'))) {
         parsed.heroSubtitle = DEFAULT_SETTINGS.heroSubtitle;
       }
-      if (parsed.promoSubtitle && (parsed.promoSubtitle.includes('عسل') || parsed.promoSubtitle.includes('خرما'))) {
+      if (parsed.promoSubtitle && (parsed.promoSubtitle.includes('عسل') || parsed.promoSubtitle.includes('خرما') || parsed.promoSubtitle.includes('زعفران'))) {
         parsed.promoSubtitle = DEFAULT_SETTINGS.promoSubtitle;
       }
       delete parsed.freeShippingThreshold;
@@ -89,17 +89,16 @@ export function getLocalProducts(): Product[] {
     if (raw !== null) {
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed)) {
-        const legacyMockIds = new Set(['prod-1','prod-2','prod-3','prod-4','prod-5','prod-6','prod-7','prod-8','prod-9','prod-10','prod-11','prod-12']);
-        const valid = parsed.filter(
+        const legacyMockIds = new Set(['prod-1','prod-2','prod-3','prod-4','prod-5','prod-6','prod-7','prod-8','prod-9','prod-10','prod-11','prod-12','prod_saffron_super_negin']);
+        return parsed.filter(
           (p: any) => p && p.id && !legacyMockIds.has(p.id)
         );
-        if (valid.length > 0) return valid;
       }
     }
   } catch (e) {
     console.error('Failed to read products from localStorage', e);
   }
-  return AUTHENTIC_DEFAULT_PRODUCTS;
+  return [];
 }
 
 export function saveLocalProducts(products: Product[]): void {
@@ -138,6 +137,8 @@ export function extractPublicSettings(s: StoreSettings): Record<string, any> {
     'storeName', 'slogan', 'shippingCost', 'freeShippingThreshold', 'supportPhone',
     'supportWhatsApp', 'supportInstagram', 'supportTelegram', 'supportAddress',
     'announcement', 'isStoreOpen', 'storeClosedMessage', 'shippingNote',
+    'introEnabled', 'introBadge', 'introTitle', 'introSlogan', 'introSubtitle', 'introButtonText',
+    'footerCopyright',
     'heroBadge', 'heroTitle', 'heroSubtitle', 'heroButtonText',
     'promoBadge', 'promoTitle', 'promoSubtitle', 'aboutText',
     'qualityBadge1', 'qualityBadge2', 'qualityBadge3', 'qualityBadge4',
@@ -235,7 +236,7 @@ export async function fetchProducts(): Promise<Product[]> {
     const res = await fetch('/api/products');
     if (res.ok) {
       const data = await res.json();
-      if (data?.success && Array.isArray(data.products) && data.products.length > 0) {
+      if (data?.success && Array.isArray(data.products)) {
         saveLocalProducts(data.products);
         return data.products;
       }
@@ -252,21 +253,20 @@ export async function fetchProducts(): Promise<Product[]> {
       const list: Product[] = [];
       querySnapshot.forEach(docSnap => {
         const prod = docSnap.data() as Product;
-        if (prod.id && !['prod-1','prod-2','prod-3','prod-4','prod-5','prod-6','prod-7','prod-8','prod-9','prod-10','prod-11','prod-12'].includes(prod.id)) {
+        const legacyMockIds = new Set(['prod-1','prod-2','prod-3','prod-4','prod-5','prod-6','prod-7','prod-8','prod-9','prod-10','prod-11','prod-12','prod_saffron_super_negin']);
+        if (prod.id && !legacyMockIds.has(prod.id)) {
           list.push(prod);
         }
       });
-      if (list.length > 0) {
-        saveLocalProducts(list);
-        return list;
-      }
+      saveLocalProducts(list);
+      return list;
     }
   } catch (error) {
     console.warn('Firestore products fetch notice, using cached products:', error);
   }
 
   const local = getLocalProducts();
-  return local && local.length > 0 ? local : AUTHENTIC_DEFAULT_PRODUCTS;
+  return local || [];
 }
 
 export function sanitizeForFirestore<T extends Record<string, any>>(obj: T): Record<string, any> {
@@ -658,42 +658,82 @@ export async function updateOrderStatus(
   }
 }
 
-// Lookup order securely by Order ID and Phone Number
-export async function searchOrder(orderIdQuery: string, phoneQuery?: string): Promise<Order | null> {
-  const cleanId = orderIdQuery.trim().toUpperCase();
-  const cleanPhone = (phoneQuery || '').trim();
+// Request security OTP for phone-based tracking
+export async function requestTrackingOtp(phone: string): Promise<{ success: boolean; message: string; securityCode?: string }> {
+  const res = await fetch('/api/orders/track/request-otp', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ phone })
+  });
 
-  // 1. Try secure server-side tracking endpoint (checks phone matching to prevent data leak)
-  try {
-    const res = await fetch('/api/orders/track', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ orderId: cleanId, phone: cleanPhone })
-    });
-
-    if (res.ok) {
-      const data = await res.json();
-      if (data?.success && data?.order) {
-        return data.order as Order;
-      }
-    } else {
-      const errRes = await res.json().catch(() => null);
-      if (errRes?.error) {
-        throw new Error(errRes.error);
-      }
-    }
-  } catch (err: any) {
-    if (err.message && (err.message.includes('مطابقت ندارد') || err.message.includes('یافت نشد'))) {
-      throw err;
-    }
-    console.warn('API tracking endpoint notice:', err);
+  const data = await res.json().catch(() => null);
+  if (!res.ok || !data?.success) {
+    throw new Error(data?.error || 'خطا در صدور کد تأیید امنیتی.');
   }
 
-  // 2. Check local orders placed on this device
+  return data;
+}
+
+export interface TrackingSearchParams {
+  code?: string;
+  phone?: string;
+  otpCode?: string;
+}
+
+// Dual-Mode Flexible Order Tracking lookup
+export async function searchOrderFlexible(params: TrackingSearchParams): Promise<{ order: Order | null; orders?: Order[] }> {
+  const { code, phone, otpCode } = params;
+
+  const res = await fetch('/api/orders/track', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      orderId: code?.trim(),
+      phone: phone?.trim(),
+      otpCode: otpCode?.trim()
+    })
+  });
+
+  const data = await res.json().catch(() => null);
+  if (!res.ok) {
+    throw new Error(data?.error || 'خطا در استعلام وضعیت سفارش.');
+  }
+
+  if (data?.success) {
+    if (data.order) {
+      saveMyPlacedOrder(data.order);
+    }
+    return {
+      order: (data.order as Order) || null,
+      orders: (data.orders as Order[]) || (data.order ? [data.order as Order] : [])
+    };
+  }
+
+  return { order: null, orders: [] };
+}
+
+// Lookup order securely by Order ID or Phone Number (Backwards-compatible wrapper)
+export async function searchOrder(orderIdQuery?: string, phoneQuery?: string, otpCode?: string): Promise<Order | null> {
+  try {
+    const res = await searchOrderFlexible({
+      code: orderIdQuery,
+      phone: phoneQuery,
+      otpCode
+    });
+    if (res.order) return res.order;
+  } catch (err: any) {
+    // If exact API error was thrown, pass it through so UI displays clear message
+    throw err;
+  }
+
+  // Check local orders placed on this device as fallback
   const myOrders = getMyPlacedOrders();
+  const cleanId = (orderIdQuery || '').trim().toUpperCase();
+  const cleanPhone = (phoneQuery || '').trim().replace(/\D/g, '');
+
   const localMatch = myOrders.find(o => 
-    o.id.toUpperCase() === cleanId || 
-    (cleanPhone && o.customerPhone.replace(/[\s-]/g, '').endsWith(cleanPhone.replace(/[\s-]/g, '').slice(-7)))
+    (cleanId && o.id.toUpperCase() === cleanId) || 
+    (cleanPhone && cleanPhone.length >= 10 && o.customerPhone.replace(/\D/g, '').endsWith(cleanPhone.slice(-10)))
   );
   if (localMatch) return localMatch;
 
@@ -701,57 +741,54 @@ export async function searchOrder(orderIdQuery: string, phoneQuery?: string): Pr
 }
 
 // -------------------------------------------------------------
-// NTFY PUSH NOTIFICATION SENDER
+// SECURE SERVER-SIDE NTFY PUSH NOTIFICATIONS
 // -------------------------------------------------------------
 export interface NtfyPayload {
-  topic: string;
-  title: string;
-  message: string;
+  topic?: string;
+  title?: string;
+  message?: string;
   tags?: string[];
-  priority?: number; // 1 = min, 3 = default, 4 = high, 5 = urgent
+  priority?: number;
   clickUrl?: string;
 }
 
-export async function sendNtfyNotification(payload: NtfyPayload): Promise<{ success: boolean; status: number; text: string }> {
-  const cleanTopic = payload.topic.trim().replace(/^https?:\/\/ntfy\.sh\//, '');
-  if (!cleanTopic) {
-    return { success: false, status: 400, text: 'نام تاپیک ntfy خالی است' };
-  }
-
+// Dispatches test notification through secure server proxy (never exposes ntfy secrets in browser)
+export async function sendNtfyNotification(payload?: NtfyPayload): Promise<{ success: boolean; status: number; text: string }> {
   try {
-    const headers: Record<string, string> = {
-      'Title': encodeURIComponent(payload.title),
-      'Priority': String(payload.priority || 3),
-    };
-
-    if (payload.tags && payload.tags.length > 0) {
-      headers['Tags'] = payload.tags.join(',');
-    }
-
-    if (payload.clickUrl) {
-      headers['Click'] = payload.clickUrl;
-    }
-
-    const res = await fetch(`https://ntfy.sh/${cleanTopic}`, {
+    const res = await fetch('/api/admin/notifications/test-ntfy', {
       method: 'POST',
-      body: payload.message,
-      headers,
+      headers: getAdminAuthHeaders(),
+      body: JSON.stringify({ message: payload?.message })
     });
 
-    const resText = await res.text();
-    return {
-      success: res.ok,
-      status: res.status,
-      text: res.ok ? 'ارسال شد' : resText
-    };
+    const data = await res.json().catch(() => null);
+    if (res.ok && data?.success) {
+      return { success: true, status: 200, text: data.message || 'اعلان با موفقیت ارسال شد.' };
+    } else {
+      return { success: false, status: res.status, text: data?.error || 'خطا در ارسال اعلان به سرور ntfy' };
+    }
   } catch (err: any) {
-    console.error('Failed to dispatch ntfy push notification:', err);
     return {
       success: false,
       status: 500,
-      text: err.message || 'خطا در برقراری ارتباط با سرور ntfy'
+      text: err.message || 'خطا در برقراری ارتباط با سرور'
     };
   }
+}
+
+// Re-sends full order notification from server
+export async function resendOrderNotification(orderId: string): Promise<{ success: boolean; message: string }> {
+  const res = await fetch(`/api/admin/orders/${encodeURIComponent(orderId)}/resend-ntfy`, {
+    method: 'POST',
+    headers: getAdminAuthHeaders()
+  });
+
+  const data = await res.json().catch(() => null);
+  if (!res.ok || !data?.success) {
+    throw new Error(data?.error || 'خطا در ارسال مجدد اعلان سفارش به ntfy.');
+  }
+
+  return data;
 }
 
 // -------------------------------------------------------------

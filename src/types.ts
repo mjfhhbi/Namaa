@@ -122,6 +122,15 @@ export interface StoreSettings {
   isStoreOpen: boolean;
   storeClosedMessage?: string;
   shippingNote?: string;
+  // متون صفحه ورودی و انیمیشن اسپلش (CMS ورودی سایت)
+  introEnabled?: boolean;
+  introBadge?: string;
+  introTitle?: string;
+  introSlogan?: string;
+  introSubtitle?: string;
+  introButtonText?: string;
+  // متون کپی‌رایت و پاورقی
+  footerCopyright?: string;
   // متون کامل سایت (CMS قابل ویرایش کامل از پنل مدیریت)
   heroBadge?: string;
   heroTitle?: string;
@@ -159,6 +168,12 @@ export const DEFAULT_STORE_SETTINGS: StoreSettings = {
   isStoreOpen: true,
   storeClosedMessage: 'فروشگاه ناما در حال حاضر مشغول بروزرسانی موجودی انبار می‌باشد.',
   shippingNote: 'ارسال با بسته‌بندی ایمن و ضربه‌گیر به سراسر ایران از طریق شرکت ملی پست جمهوری اسلامی ایران (پست پیشتاز).',
+  introEnabled: true,
+  introBadge: 'محصولات غذایی اصیل و طبیعی',
+  introTitle: 'فروشگاه مواد غذایی ناما',
+  introSlogan: '«از نام و جان، برای طعمی ماندگار»',
+  introSubtitle: 'دستچین اصیل‌ترین محصولات طبیعی ایران',
+  introButtonText: 'ورود به فروشگاه',
   heroBadge: 'محصولات غذایی ۱۰۰٪ طبیعی، سالم و دستچین ایرانی',
   heroTitle: 'از نام و جان، برای طعمی ماندگار',
   heroSubtitle: 'سفره‌ای پربرکت با اصیل‌ترین خوراکی‌های سنتی، سالم و سلامت‌محور ایران؛ دستچین‌شده با تعهد به خلوص، کیفیت ممتاز و طعمی ماندگار.',
@@ -170,9 +185,8 @@ export const DEFAULT_STORE_SETTINGS: StoreSettings = {
   qualityBadge2: 'تضمین ۱۰۰٪ اصالت',
   qualityBadge3: 'بسته‌بندی ایمن پستی',
   qualityBadge4: 'ارسال فوری سراسری',
-  customCategories: [
-    { id: 'saffron', name: 'زعفران و زرشک اعلا', icon: '✨', description: 'زعفران سوپر نگین قائنات و زرشک اناری تازه' },
-  ],
+  footerCopyright: 'تمامی حقوق متعلق به فروشگاه محصولات غذایی ناما (NAMA FOOD PRODUCTS) می‌باشد.',
+  customCategories: [],
   discountCodes: [],
   zarinpalEnabled: false,
   zarinpalSandbox: true,
@@ -182,47 +196,8 @@ export const PROMO_ASSET_IMAGES = {
   superNeginSaffron: 'https://images.unsplash.com/photo-1615485500704-8e990f9900f7?auto=format&fit=crop&w=800&q=80',
 };
 
-export const PRESET_PRODUCT_IMAGES: { name: string; url: string; category: string }[] = [
-  {
-    name: 'زعفران سوپر نگین اعلا',
-    url: 'https://images.unsplash.com/photo-1615485500704-8e990f9900f7?auto=format&fit=crop&w=800&q=80',
-    category: 'saffron',
-  },
-  {
-    name: 'رشته‌های زعفران قائنات',
-    url: 'https://images.unsplash.com/photo-1599305090598-fe179d501227?auto=format&fit=crop&w=800&q=80',
-    category: 'saffron',
-  },
-];
+export const PRESET_PRODUCT_IMAGES: { name: string; url: string; category: string }[] = [];
 
-export const AUTHENTIC_DEFAULT_PRODUCTS: Product[] = [
-  {
-    id: 'prod_saffron_super_negin',
-    name: 'زعفران سوپر نگین اعلای قائنات',
-    category: 'saffron',
-    categoryLabel: 'زعفران و زرشک اعلا',
-    price: 495000,
-    originalPrice: 550000,
-    weight: 'یک مثقال (۴.۶ گرم)',
-    description: 'زعفران اصیل و دستچین سوپر نگین قائنات خراسان، بدون هیچ‌گونه خامه و ناخالصی با بالاترین درجه رنگ‌دهی طبیعی، عطر گیرا و تاییدیه آزمایشگاه تخصصی ناما.',
-    shortDesc: 'زعفران اعلای سوپر نگین قائنات با تضمین آزمایشگاهی خلوص و عطر',
-    benefits: [
-      'بالاترین عیار کروسین (قدرت رنگ‌دهی طبیعی)',
-      'دستچین شده از مزارع ممتاز قائنات خراسان',
-      'بسته‌بندی کریستالی پلمپ ضد رطوبت و نور',
-      'تضمین ۱۰۰٪ اصالت و بازگشت وجه بی‌قید و شرط'
-    ],
-    origin: 'خراسان جنوبی، قائنات',
-    stock: 50,
-    image: 'https://images.unsplash.com/photo-1615485500704-8e990f9900f7?auto=format&fit=crop&w=800&q=80',
-    isPopular: true,
-    isOrganic: true,
-    isFeatured: true,
-    isNewArrival: true,
-    badge: 'صادراتی اعلا',
-    rating: 5,
-    harvestYear: '۱۴۰۳',
-    createdAt: '2026-10-24T00:00:00.000Z'
-  }
-];
+// Empty initial products - No fake or hardcoded mock products!
+export const AUTHENTIC_DEFAULT_PRODUCTS: Product[] = [];
 

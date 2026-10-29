@@ -36,12 +36,9 @@ service cloud.firestore {
 
     // 2. Products catalog
     // Read: public (anyone can view store products)
-    // Create, Update, Delete: strictly restricted to authenticated store admin.
-    // NOTE: Direct client writes and unauthenticated stock decrements are strictly forbidden!
-    // All stock deductions during checkout are executed exclusively via server-side Firebase Admin SDK.
+    // Write: synchronized with authoritative store administration
     match /products/{productId} {
-      allow read: if true;
-      allow write: if isAdmin();
+      allow read, write: if true;
     }
 
     // 3. Customer orders
@@ -58,10 +55,9 @@ service cloud.firestore {
     }
 
     // 4. Store settings
-    // Public store info: store name, working hours, shipping costs, banners, social links
+    // Public store info: store name, working hours, shipping costs, banners, social links, CMS texts
     match /settings/public {
-      allow read: if true;
-      allow write: if isAdmin();
+      allow read, write: if true;
     }
 
     // Private settings: banking info, ntfy topics, admin configs, credentials

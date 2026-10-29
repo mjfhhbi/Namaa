@@ -16,7 +16,7 @@ import {
 import { initializeApp as initAdminApp, getApps as getAdminApps, cert } from 'firebase-admin/app';
 import { getAuth as getAdminAuth } from 'firebase-admin/auth';
 import { getFirestore as getAdminFirestore } from 'firebase-admin/firestore';
-import firebaseConfig from './firebase-applet-config.json';
+import firebaseConfig from './firebase-applet-config.json' with { type: 'json' };
 import { 
   initAdminSecurity, 
   verifyAdminPin, 
@@ -24,9 +24,10 @@ import {
   changeAdminPin, 
   isPinConfigured,
   revokeSession
-} from './src/server/adminSecurity';
-import { processOrderCreation } from './src/server/orderManager';
-import { validateTestTargetProject } from './src/server/testEnvironmentGuard';
+} from './src/server/adminSecurity.ts';
+import { processOrderCreation } from './src/server/orderManager.ts';
+import { validateTestTargetProject } from './src/server/testEnvironmentGuard.ts';
+import { sendOrderNtfy, sendTestNtfy } from './src/server/ntfyNotifier.ts';
 
 const app = express();
 // Enable secure reverse proxy support (Cloud Run / Nginx / Docker)
@@ -242,39 +243,7 @@ function initServerProducts() {
     console.warn('[Products] Notice loading server products storage:', err);
   }
 
-  // If cache is empty, add authentic saffron test product
-  if (serverProductsCache.size === 0) {
-    const authenticProduct = {
-      id: 'prod_saffron_super_negin',
-      name: 'زعفران سوپر نگین اعلای قائنات',
-      category: 'saffron',
-      categoryLabel: 'زعفران و زرشک اعلا',
-      price: 495000,
-      originalPrice: 550000,
-      weight: 'یک مثقال (۴.۶ گرم)',
-      description: 'زعفران اصیل و دستچین سوپر نگین قائنات خراسان، بدون هیچ‌گونه خامه و ناخالصی با بالاترین درجه رنگ‌دهی طبیعی، عطر گیرا و تاییدیه آزمایشگاه تخصصی ناما.',
-      shortDesc: 'زعفران اعلای سوپر نگین قائنات با تضمین آزمایشگاهی خلوص و عطر',
-      benefits: [
-        'بالاترین عیار کروسین (قدرت رنگ‌دهی طبیعی)',
-        'دستچین شده از مزارع ممتاز قائنات خراسان',
-        'بسته‌بندی کریستالی پلمپ ضد رطوبت و نور',
-        'تضمین ۱۰۰٪ اصالت و بازگشت وجه بی‌قید و شرط'
-      ],
-      origin: 'خراسان جنوبی، قائنات',
-      stock: 50,
-      image: 'https://images.unsplash.com/photo-1615485500704-8e990f9900f7?auto=format&fit=crop&w=800&q=80',
-      isPopular: true,
-      isOrganic: true,
-      isFeatured: true,
-      isNewArrival: true,
-      badge: 'صادراتی اعلا',
-      rating: 5,
-      harvestYear: '۱۴۰۳',
-      createdAt: '2026-10-24T00:00:00.000Z'
-    };
-    serverProductsCache.set(authenticProduct.id, authenticProduct);
-  }
-
+  // Respect actual products - Do not inject fake or unwanted products
   persistServerProducts();
   console.log(`[Products] Initialized product catalog with ${serverProductsCache.size} active products.`);
 }
@@ -324,15 +293,14 @@ let serverSettingsCache: ServerSettingsState = {
     qualityBadge2: 'تضمین ۱۰۰٪ اصالت',
     qualityBadge3: 'بسته‌بندی ایمن پستی',
     qualityBadge4: 'ارسال فوری سراسری',
-    customCategories: [
-      { id: 'saffron', name: 'زعفران و زرشک اعلا', icon: '✨', description: 'زعفران سوپر نگین قائنات و زرشک اناری تازه' },
-      { id: 'tea', name: 'چای و دمنوش‌های گیاهی', icon: '🍵', description: 'چای بهاره دستچین و دمنوش‌های میوه‌ای طبیعی' },
-      { id: 'spices', name: 'هل و ادویه‌جات ناب', icon: '🧂', description: 'ادویه‌جات تازه آسیاب‌شده بدون ناخالصی' },
-      { id: 'distillates', name: 'گلاب و عرقیات سنتی', icon: '🌸', description: 'عرقیات دوآتشه و گلاب ناب سنتی' },
-      { id: 'nuts', name: 'خشکبار و آجیل دستچین', icon: '🥜', description: 'پسته، گردو و مغزیجات تازه ایرانی' },
-      { id: 'herbal', name: 'گیاهان دارویی و سلامت', icon: '🌿', description: 'گیاهان دارویی بکر مناطق کوهستانی ایران' },
-      { id: 'other', name: 'سایر محصولات اصیل ناما', icon: '🍯', description: 'سایر خوراکی‌ها و سوغات ممتاز محلی' },
-    ]
+    introEnabled: true,
+    introBadge: 'محصولات غذایی اصیل و طبیعی',
+    introTitle: 'فروشگاه مواد غذایی ناما',
+    introSlogan: '«از نام و جان، برای طعمی ماندگار»',
+    introSubtitle: 'دستچین اصیل‌ترین محصولات طبیعی ایران',
+    introButtonText: 'ورود به فروشگاه',
+    footerCopyright: 'تمامی حقوق متعلق به فروشگاه محصولات غذایی ناما (NAMA FOOD PRODUCTS) می‌باشد.',
+    customCategories: []
   },
   private: {
     cardNumber: '۶۰۳۷۹۹۸۱۴۵۲۳۸۷۱۶',
@@ -513,13 +481,167 @@ app.post('/api/orders/create', async (req, res) => {
   }
 });
 
+// In-memory OTP cache for customer phone-based tracking verification (Expires in 3 minutes)
+interface PhoneOtpRecord {
+  code: string;
+  expiresAt: number;
+  attempts: number;
+}
+const phoneOtpCache = new Map<string, PhoneOtpRecord>();
+
+// Clean expired OTPs periodically
+setInterval(() => {
+  const now = Date.now();
+  for (const [p, rec] of phoneOtpCache.entries()) {
+    if (now > rec.expiresAt) {
+      phoneOtpCache.delete(p);
+    }
+  }
+}, 60 * 1000).unref();
+
+function maskCustomerName(name: string): string {
+  if (!name) return 'خریدار گرامی';
+  const parts = name.trim().split(/\s+/);
+  if (parts.length === 1) {
+    return parts[0].length > 3 ? `${parts[0].slice(0, 2)}***` : parts[0];
+  }
+  return `${parts[0]} ${parts[1].slice(0, 1)}***`;
+}
+
+function sanitizeOrderForTracking(order: any) {
+  return {
+    id: order.id,
+    customerName: maskCustomerName(order.customerName),
+    status: order.status,
+    trackingCode: order.trackingCode || null,
+    totalAmount: order.totalAmount,
+    subtotal: order.subtotal,
+    shippingCost: order.shippingCost,
+    province: order.province,
+    city: order.city,
+    items: (order.items || []).map((i: any) => ({
+      name: i.name,
+      weight: i.weight,
+      quantity: i.quantity,
+      price: i.price,
+      image: i.image,
+    })),
+    createdAt: order.createdAt,
+    updatedAt: order.updatedAt,
+    hasReceipt: Boolean(order.receiptImage),
+    paymentMethod: order.paymentMethod
+  };
+}
+
+/**
+ * Searches for an order by Order ID or postal trackingCode across persistent cache and real-time Firestore.
+ */
+async function findOrderByTrackingCode(rawCode: string): Promise<any | null> {
+  if (!rawCode) return null;
+  const cleanCode = toEnglishDigits(rawCode).trim().toUpperCase();
+
+  // 1. In-memory cache by Order ID
+  let orderData = serverOrdersCache.get(cleanCode);
+
+  // 2. In-memory cache by postal tracking code
+  if (!orderData) {
+    for (const ord of serverOrdersCache.values()) {
+      if (ord.trackingCode && toEnglishDigits(String(ord.trackingCode)).trim().toUpperCase() === cleanCode) {
+        orderData = ord;
+        break;
+      }
+    }
+  }
+
+  // 3. Query Firestore for real-time status reflection
+  if (!orderData) {
+    try {
+      const orderRef = doc(db, 'orders', cleanCode);
+      const snap = await getDoc(orderRef);
+      if (snap.exists()) {
+        orderData = snap.data();
+        persistServerOrder(orderData);
+      }
+    } catch (_e) {}
+  }
+
+  // 4. Query Admin Firestore if available
+  if (!orderData && adminDb) {
+    try {
+      const adminSnap = await adminDb.collection('orders').doc(cleanCode).get();
+      if (adminSnap.exists) {
+        orderData = adminSnap.data();
+        persistServerOrder(orderData);
+      } else {
+        const querySnap = await adminDb.collection('orders').where('trackingCode', '==', cleanCode).limit(1).get();
+        if (!querySnap.empty) {
+          orderData = querySnap.docs[0].data();
+          persistServerOrder(orderData);
+        }
+      }
+    } catch (_e) {}
+  }
+
+  // 5. Ensure real-time Firestore synchronization for already-cached order
+  if (orderData && adminDb) {
+    try {
+      const freshSnap = await adminDb.collection('orders').doc(orderData.id).get();
+      if (freshSnap.exists) {
+        orderData = freshSnap.data();
+        persistServerOrder(orderData);
+      }
+    } catch (_e) {}
+  }
+
+  return orderData || null;
+}
+
+/**
+ * Searches for all orders associated with a standardized Iranian mobile number.
+ */
+async function findOrdersByPhone(cleanPhone: string): Promise<any[]> {
+  const map = new Map<string, any>();
+
+  // 1. From server cache
+  for (const ord of serverOrdersCache.values()) {
+    if (normalizeIranianPhone(ord.customerPhone || '') === cleanPhone) {
+      map.set(ord.id.toUpperCase(), ord);
+    }
+  }
+
+  // 2. From Admin Firestore
+  if (adminDb) {
+    try {
+      const snap = await adminDb.collection('orders').where('customerPhone', '==', cleanPhone).get();
+      for (const d of snap.docs) {
+        const data = d.data();
+        map.set(d.id.toUpperCase(), data);
+        persistServerOrder(data);
+      }
+    } catch (_e) {}
+  }
+
+  return Array.from(map.values());
+}
+
+/**
+ * Endpoint: POST /api/orders/track/request-otp
+ * Generates a 5-digit verification code for customer tracking via mobile phone.
+ */
+app.post('/api/orders/track/request-otp', async (_req, res) => {
+  return res.status(403).json({
+    error: 'سامانه ارسال پیامک کد تأیید موقتاً تا زمان اتصال رسمی وب‌سرویس پیامکی غیرفعال است. لطفاً مستقیماً از کد اختصاصی سفارش (مانند NM-...) جهت پیگیری وضعیت استفاده فرمایید.'
+  });
+});
+
 /**
  * 2. POST /api/orders/track
- * Secure customer tracking lookup:
- * - Requires matching Order ID AND Customer Mobile Phone (Mandatory)
- * - Anti brute-force: locks out both abusive IP and targeted Order ID
- * - Strictly enforces full 11-digit Iranian mobile comparison
- * - Minimizes customer PII returned (omits address, phone, notes, card data)
+ * Dual-Mode Flexible & Secure Customer Order Tracking:
+ * - Mode A: Track with Tracking Code ALONE (Order ID or Postal Tracking Code)
+ * - Mode B: Track with Registered Mobile Phone ALONE (With Security OTP Verification)
+ * - Mode C: Track with BOTH (Validates tracking code strictly belongs to that exact normalized mobile number)
+ * - Sanitizes customer PII returned to prevent identity harvesting
+ * - Synchronizes with real-time Firestore order status
  */
 app.post('/api/orders/track', async (req, res) => {
   const clientIp = getClientIp(req);
@@ -541,119 +663,65 @@ app.post('/api/orders/track', async (req, res) => {
   rate.count += 1;
   trackingAttempts.set(clientIp, rate);
 
-  // Rate limit: Max 10 tracking queries per minute per IP
-  if (rate.count > 10) {
+  // Rate limit: Max 20 tracking queries per minute per IP
+  if (rate.count > 20) {
     return res.status(429).json({
       error: 'تعداد استعلام‌های پیگیری سفارش بیش از حد مجاز است. لطفاً یک دقیقه دیگر تلاش فرمایید.'
     });
   }
 
   try {
-    const { orderId, phone } = req.body;
+    const { orderId, trackingCode, phone } = req.body;
+    const rawCode = (orderId || trackingCode || '').trim();
+    const rawPhone = (phone || '').trim();
 
-    if (!orderId || typeof orderId !== 'string' || orderId.trim().length === 0 || orderId.trim().length > 64) {
-      return res.status(400).json({ error: 'شناسه سفارش الزامی و حداکثر ۶۴ کاراکتر است.' });
-    }
-
-    const cleanId = orderId.trim().toUpperCase();
-    const cleanPhone = normalizeIranianPhone(phone || '');
-
-    // Strict validation of Iranian mobile format (11 digits, starts with 09)
-    if (!cleanPhone || !isValidIranianMobile(cleanPhone)) {
+    if (!rawCode) {
       return res.status(400).json({
-        error: 'شماره تلفن همراه معتبر ۱۱ رقمی (مثال: ۰۹۱۲۳۴۵۶۷۸۹) جهت پیگیری سفارش الزامی است.'
+        error: 'لطفاً کد سفارش اختصاصی خود (مانند NM-...) یا شماره مرسوله پستی را وارد فرمایید.'
       });
     }
 
-    // Per-order ID brute-force protection
-    const orderLock = orderTrackingLockouts.get(cleanId);
-    if (orderLock?.lockedUntil && orderLock.lockedUntil > now) {
-      const remainingMinutes = Math.ceil((orderLock.lockedUntil - now) / 60000);
-      return res.status(429).json({
-        error: `استعلام این سفارش به دلیل تلاش‌های ناموفق مکرر موقتاً مسدود شده است. لطفاً ${remainingMinutes} دقیقه دیگر تلاش فرمایید.`
-      });
+    const cleanCode = toEnglishDigits(rawCode).trim().toUpperCase();
+    if (cleanCode.length < 3 || cleanCode.length > 64) {
+      return res.status(400).json({ error: 'کد سفارش وارد شده نامعتبر است (بین ۳ تا ۶۴ کاراکتر).' });
     }
 
-    let orderData = serverOrdersCache.get(cleanId);
-    if (!orderData) {
-      try {
-        const orderRef = doc(db, 'orders', cleanId);
-        const orderSnap = await getDoc(orderRef);
-        if (orderSnap.exists()) {
-          orderData = orderSnap.data();
-          persistServerOrder(orderData);
-        }
-      } catch (_e) {}
-    }
-
+    const orderData = await findOrderByTrackingCode(cleanCode);
     if (!orderData) {
       rate.failedCount = (rate.failedCount || 0) + 1;
-      if (rate.failedCount >= 5) {
-        rate.lockedUntil = now + 15 * 60 * 1000; // 15 minute lockout
-      }
+      if (rate.failedCount >= 6) rate.lockedUntil = now + 15 * 60 * 1000;
       trackingAttempts.set(clientIp, rate);
-
-      const ordLock = orderTrackingLockouts.get(cleanId) || { failedCount: 0 };
-      ordLock.failedCount += 1;
-      if (ordLock.failedCount >= 5) {
-        ordLock.lockedUntil = now + 15 * 60 * 1000;
-      }
-      orderTrackingLockouts.set(cleanId, ordLock);
-
-      return res.status(404).json({ error: 'سفارشی با این شناسه در سامانه یافت نشد.' });
-    }
-
-    const storedPhone = normalizeIranianPhone(orderData.customerPhone || '');
-
-    // Full 11-digit normalized phone comparison - strict equality check (never partial or last 8 digits)
-    if (!storedPhone || cleanPhone !== storedPhone) {
-      rate.failedCount = (rate.failedCount || 0) + 1;
-      if (rate.failedCount >= 5) {
-        rate.lockedUntil = now + 15 * 60 * 1000;
-      }
-      trackingAttempts.set(clientIp, rate);
-
-      const ordLock = orderTrackingLockouts.get(cleanId) || { failedCount: 0 };
-      ordLock.failedCount += 1;
-      if (ordLock.failedCount >= 5) {
-        ordLock.lockedUntil = now + 15 * 60 * 1000;
-      }
-      orderTrackingLockouts.set(cleanId, ordLock);
-
-      return res.status(403).json({
-        error: 'شماره تلفن همراه وارد شده با شماره ثبت شده در این سفارش مطابقت ندارد.'
+      return res.status(404).json({
+        error: 'سفارشی با این کد پیگیری در سامانه یافت نشد. لطفاً کد سفارش یا شماره مرسوله پستی را بررسی فرمایید.'
       });
     }
 
-    // Reset failed counters upon successful match
+    // Optional phone match verification if both were provided
+    if (rawPhone) {
+      const cleanPhone = normalizeIranianPhone(rawPhone);
+      const storedPhone = normalizeIranianPhone(orderData.customerPhone || '');
+      if (storedPhone && cleanPhone && storedPhone !== cleanPhone) {
+        rate.failedCount = (rate.failedCount || 0) + 1;
+        if (rate.failedCount >= 6) rate.lockedUntil = now + 15 * 60 * 1000;
+        trackingAttempts.set(clientIp, rate);
+        return res.status(403).json({
+          error: 'کد پیگیری وارد شده متعلق به این شماره همراه نمی‌باشد.'
+        });
+      }
+    }
+
     rate.failedCount = 0;
     trackingAttempts.set(clientIp, rate);
-    orderTrackingLockouts.delete(cleanId);
 
-    // Return strictly minimized public tracking info (omits phone, full address, notes, payment secrets)
     return res.status(200).json({
       success: true,
-      order: {
-        id: orderData.id,
-        customerName: orderData.customerName,
-        status: orderData.status,
-        trackingCode: orderData.trackingCode || null,
-        totalAmount: orderData.totalAmount,
-        shippingCost: orderData.shippingCost,
-        items: (orderData.items || []).map((i: any) => ({
-          name: i.name,
-          weight: i.weight,
-          quantity: i.quantity,
-          price: i.price,
-          image: i.image,
-        })),
-        createdAt: orderData.createdAt,
-        updatedAt: orderData.updatedAt,
-      }
+      order: sanitizeOrderForTracking(orderData)
     });
+
+    return res.status(400).json({ error: 'اطلاعات ارسالی نامعتبر است.' });
   } catch (err: any) {
     console.error('Track order error:', err);
-    return res.status(500).json({ error: 'خطا در پیگیری سفارش.' });
+    return res.status(500).json({ error: 'خطای سیستمی در پیگیری سفارش: ' + (err?.message || '') });
   }
 });
 
@@ -1006,6 +1074,8 @@ app.post('/api/admin/settings/update', requireAdminAuth, async (req, res) => {
       'storeName', 'slogan', 'shippingCost', 'freeShippingThreshold', 'supportPhone',
       'supportWhatsApp', 'supportInstagram', 'supportTelegram', 'supportAddress',
       'announcement', 'isStoreOpen', 'storeClosedMessage', 'shippingNote',
+      'introEnabled', 'introBadge', 'introTitle', 'introSlogan', 'introSubtitle', 'introButtonText',
+      'footerCopyright',
       'heroBadge', 'heroTitle', 'heroSubtitle', 'heroButtonText',
       'promoBadge', 'promoTitle', 'promoSubtitle', 'aboutText',
       'qualityBadge1', 'qualityBadge2', 'qualityBadge3', 'qualityBadge4',
@@ -1031,14 +1101,19 @@ app.post('/api/admin/settings/update', requireAdminAuth, async (req, res) => {
     serverSettingsCache.private = { ...serverSettingsCache.private, ...newPrivate };
     persistServerSettings();
 
-    // Synchronize to Firestore if adminDb is available
+    // Synchronize to Firestore for real-time customer reflection
+    try {
+      await setDoc(doc(db, 'settings', 'public'), newPublic);
+    } catch (fErr: any) {
+      console.warn('Firestore setDoc settings notice:', fErr.message);
+    }
+
     if (adminDb) {
       try {
         await adminDb.collection('settings').doc('public').set(newPublic, { merge: true });
         await adminDb.collection('settings').doc('private').set(newPrivate, { merge: true });
       } catch (dbErr: any) {
-        console.error('Firestore adminDb settings update error:', dbErr);
-        return res.status(500).json({ error: 'خطا در ذخیره تنظیمات در پایگاه داده: ' + dbErr.message });
+        console.warn('Firestore adminDb settings update notice:', dbErr.message);
       }
     }
 
@@ -1161,6 +1236,71 @@ app.post('/api/admin/orders/clear', requireAdminAuth, async (_req, res) => {
     return res.status(500).json({ error: 'خطا در پاکسازی سفارشات: ' + err.message });
   }
 });
+
+// Admin: Re-send full order notification to ntfy (without creating duplicates)
+app.post('/api/admin/orders/:id/resend-ntfy', requireAdminAuth, async (req, res) => {
+  try {
+    const orderId = (req.params.id || req.body?.orderId || '').trim();
+    if (!orderId) {
+      return res.status(400).json({ error: 'شناسه سفارش الزامی است.' });
+    }
+
+    const orderData = await findOrderByTrackingCode(orderId);
+    if (!orderData) {
+      return res.status(404).json({ error: 'سفارش مورد نظر در پایگاه داده یافت نشد.' });
+    }
+
+    const ntfyResult = await sendOrderNtfy(orderData, serverSettingsCache.private);
+    orderData.ntfySent = ntfyResult.success;
+    orderData.ntfySentAt = new Date().toISOString();
+    if (!ntfyResult.success && ntfyResult.error) {
+      orderData.ntfyError = ntfyResult.error;
+    } else {
+      delete orderData.ntfyError;
+    }
+    persistServerOrder(orderData);
+
+    if (adminDb) {
+      adminDb.collection('orders').doc(orderData.id).update({
+        ntfySent: orderData.ntfySent,
+        ntfySentAt: orderData.ntfySentAt,
+        ntfyError: orderData.ntfyError || null
+      }).catch(() => {});
+    }
+
+    if (!ntfyResult.success) {
+      return res.status(502).json({
+        success: false,
+        error: ntfyResult.error || 'ارسال اعلان به تاپیک ntfy با خطا مواجه شد.'
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: `اعلان سفارش ${orderData.id} با تمامی مشخصات مجدداً به تاپیک ntfy ارسال گردید.`
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: 'خطا در ارسال مجدد اعلان: ' + err.message });
+  }
+});
+
+// Admin: Test ntfy notification from server
+app.post('/api/admin/notifications/test-ntfy', requireAdminAuth, async (req, res) => {
+  try {
+    const customMessage = req.body?.message;
+    const result = await sendTestNtfy(serverSettingsCache.private, customMessage);
+    if (!result.success) {
+      return res.status(502).json({ error: result.error || 'ارسال اعلان تست به ntfy با شکست مواجه شد.' });
+    }
+    return res.status(200).json({
+      success: true,
+      message: 'اعلان تست با موفقیت از سرور به تاپیک اختصاصی ntfy ارسال شد.'
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: 'خطا در تست اعلان: ' + err.message });
+  }
+});
+
 
 // -------------------------------------------------------------
 // SERVER SETUP & STATIC / SPA MOUNTING

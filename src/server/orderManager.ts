@@ -1,5 +1,6 @@
 import crypto from 'crypto';
 import { normalizeIranianPhone, isValidIranianMobile, toEnglishDigits } from '../utils/phone';
+import { sendOrderNtfy } from './ntfyNotifier';
 
 // Simple Async Mutex to serialize order placements and prevent stock race conditions
 class AsyncMutex {
@@ -475,26 +476,28 @@ export async function processOrderCreation(
       timestamp: Date.now()
     });
 
-    // 11. Send privacy-preserving instant ntfy push notification to store owner
+    // 11. Send complete order notification to store owner's private ntfy topic
+    // Guaranteed: order is already safely persisted; notification failure NEVER aborts or deletes the order
     try {
-      const topic = serverSettingsCache.private.ntfyTopic || 'nama_store_orders_1383';
-      const cleanTopic = topic.trim().replace(/^https?:\/\/ntfy\.sh\//, '');
-      if (cleanTopic) {
-        const maskedName = cleanOrder.customerName.length > 3
-          ? `${cleanOrder.customerName.slice(0, 3)}***`
-          : cleanOrder.customerName;
-
-        fetch(`https://ntfy.sh/${cleanTopic}`, {
-          method: 'POST',
-          headers: {
-            'Title': encodeURIComponent(`🌿 سفارش جدید ناما (${orderId})`),
-            'Priority': '4',
-            'Tags': 'shopping_cart,package,dollar'
-          },
-          body: `سفارش جدید ${orderId} به مبلغ ${cleanOrder.totalAmount.toLocaleString('fa-IR')} تومان ثبت شد.\nنام: ${maskedName}\nشهر: ${cleanOrder.city}\n(جزئیات کامل، شماره تماس و آدرس فقط در پنل امن مدیریت ثبت گردید)`
+      const ntfyRes = await sendOrderNtfy(cleanOrder, serverSettingsCache.private);
+      cleanOrder.ntfySent = ntfyRes.success;
+      cleanOrder.ntfySentAt = new Date().toISOString();
+      if (!ntfyRes.success && ntfyRes.error) {
+        cleanOrder.ntfyError = ntfyRes.error;
+      }
+      persistServerOrder(cleanOrder);
+      if (adminDb) {
+        adminDb.collection('orders').doc(orderId).update({
+          ntfySent: cleanOrder.ntfySent,
+          ntfySentAt: cleanOrder.ntfySentAt,
+          ...(cleanOrder.ntfyError ? { ntfyError: cleanOrder.ntfyError } : {})
         }).catch(() => {});
       }
-    } catch (_e) {}
+    } catch (ntfyErr: any) {
+      console.warn('[ntfy] Non-blocking notification catch:', ntfyErr?.message);
+      cleanOrder.ntfySent = false;
+      cleanOrder.ntfyError = ntfyErr?.message || 'خطا در ارسال اعلان';
+    }
 
     return {
       success: true,

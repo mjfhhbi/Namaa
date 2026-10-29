@@ -159,12 +159,12 @@ export const Footer: React.FC<FooterProps> = ({
                 referrerPolicy="no-referrer"
               />
               <span>
-                © {new Date().getFullYear()} تمامی حقوق متعلق به فروشگاه محصولات غذایی ناما (NAMA FOOD PRODUCTS) می‌باشد.
+                {settings.footerCopyright || `© ${new Date().getFullYear()} تمامی حقوق متعلق به ${settings.storeName || 'فروشگاه محصولات غذایی ناما (NAMA FOOD PRODUCTS)'} می‌باشد.`}
               </span>
             </div>
 
             <div className="flex items-center gap-1.5 font-bold text-[#D4A340]">
-              <span>از نام و جان، برای طعمی ماندگار</span>
+              <span>{settings.slogan || 'از نام و جان، برای طعمی ماندگار'}</span>
               <span>🌿</span>
             </div>
           </div>

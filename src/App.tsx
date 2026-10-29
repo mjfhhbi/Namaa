@@ -37,6 +37,7 @@ import { AdminModal } from './components/AdminModal';
 import { AdminLoginDialog } from './components/AdminLoginDialog';
 import { Footer } from './components/Footer';
 import { WhatsAppButton } from './components/WhatsAppButton';
+import { IntroSplash } from './components/IntroSplash';
 import { DEFAULT_STORE_SETTINGS, AUTHENTIC_DEFAULT_PRODUCTS } from './types';
 import { 
   SlidersHorizontal, 
@@ -44,7 +45,9 @@ import {
   Leaf, 
   Filter, 
   Plus, 
-  KeyRound 
+  KeyRound,
+  CheckCircle2,
+  ShoppingBag
 } from 'lucide-react';
 
 export default function App() {
@@ -82,13 +85,38 @@ export default function App() {
   // Modals
   const [isCartOpen, setIsCartOpen] = useState(false);
   const [isCartBumping, setIsCartBumping] = useState(false);
+  const [addedFeedback, setAddedFeedback] = useState<{ product: Product; quantity: number } | null>(null);
   const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
-  const [isTrackingOpen, setIsTrackingOpen] = useState(false);
-  const [isAdminOpen, setIsAdminOpen] = useState(false);
-  const [isAdminLoginDialogOpen, setIsAdminLoginDialogOpen] = useState(false);
+  // Strict Path-Based Routing: '/' is Public Storefront, '/admin' is Admin Area
+  const [currentPath, setCurrentPath] = useState<string>(() => {
+    if (typeof window !== 'undefined') {
+      return window.location.pathname.toLowerCase();
+    }
+    return '/';
+  });
+
   const [isAdminLoggedIn, setIsAdminLoggedIn] = useState(false);
   const [adminUserEmail, setAdminUserEmail] = useState<string | null>(null);
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
+
+  // Sync route on popstate (browser back/forward)
+  useEffect(() => {
+    const handleLocationChange = () => {
+      if (typeof window !== 'undefined') {
+        setCurrentPath(window.location.pathname.toLowerCase());
+      }
+    };
+    window.addEventListener('popstate', handleLocationChange);
+    return () => window.removeEventListener('popstate', handleLocationChange);
+  }, []);
+
+  const navigateTo = (path: string) => {
+    if (typeof window !== 'undefined') {
+      window.history.pushState({}, '', path);
+      setCurrentPath(path.toLowerCase());
+      window.scrollTo(0, 0);
+    }
+  };
 
   // Monitor Admin Login State via secure Session Token (Pure PIN/Password, no Google popups)
   useEffect(() => {
@@ -107,46 +135,14 @@ export default function App() {
     return () => window.removeEventListener('storage', checkToken);
   }, []);
 
-  const handleOpenAdminTrigger = () => {
-    const token = sessionStorage.getItem('nama_admin_token');
-    if (token) {
-      setIsAdminOpen(true);
-    } else {
-      setIsAdminLoginDialogOpen(true);
-    }
-  };
-
   const handleAdminLoginSuccess = (_token: string) => {
     setIsAdminLoggedIn(true);
     setAdminUserEmail('مدیر سیستم');
-    setIsAdminLoginDialogOpen(false);
-    setIsAdminOpen(true);
     showToast('ورود به پنل مدیریت با موفقیت انجام شد.');
   };
 
-  // پس از لود شدن کامل صفحه، اگر پارامترهای اضافی مثل ?admin=true یا مسیر /admin در URL وجود داشت،
-  // آن‌ها را بی‌صدا از نوار آدرس مرورگر پاک می‌کنیم تا همیشه ویترین تمیز فروشگاه برای مشتریان نمایش داده شود و هیچ دیالوگ یا پاپ‌آپی خودکار باز نشود
-  useEffect(() => {
-    try {
-      if (typeof window !== 'undefined') {
-        const url = new URL(window.location.href);
-        const hasAdminParam = url.searchParams.has('admin');
-        const isPathAdmin = url.pathname.toLowerCase().startsWith('/admin');
-        const isHashAdmin = url.hash === '#admin';
-
-        if (hasAdminParam || isPathAdmin || isHashAdmin) {
-          // پاکسازی کامل بدون باز کردن هیچ پنجره یا دیالوگی
-          url.searchParams.delete('admin');
-          const cleanPath = isPathAdmin ? '/' : url.pathname;
-          const cleanSearch = url.searchParams.toString() ? `?${url.searchParams.toString()}` : '';
-          const cleanUrl = `${cleanPath}${cleanSearch}`;
-          window.history.replaceState({}, document.title, cleanUrl);
-        }
-      }
-    } catch (e) {
-      console.warn('URL clean effect notice:', e);
-    }
-  }, []);
+  // Tracking Modal State
+  const [isTrackingOpen, setIsTrackingOpen] = useState(false);
 
   // Toast Notification
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -294,7 +290,27 @@ export default function App() {
     setIsCartBumping(true);
     setTimeout(() => {
       setIsCartBumping(false);
-    }, 800);
+    }, 900);
+
+    // Subtle, elegant visual feedback animation
+    setAddedFeedback({ product: currentProd, quantity: actualAdded });
+    setTimeout(() => {
+      setAddedFeedback(null);
+    }, 3800);
+
+    // Asynchronous real-time database stock sync
+    fetchProducts().then(freshProducts => {
+      if (freshProducts && freshProducts.length > 0) {
+        setProducts(freshProducts);
+        const liveProd = freshProducts.find(p => p.id === product.id);
+        if (liveProd && liveProd.stock !== currentProd.stock) {
+          setCart(prev => prev.map(item => item.product.id === product.id 
+            ? { ...item, product: liveProd, quantity: Math.min(item.quantity, Math.max(0, liveProd.stock)) } 
+            : item
+          ));
+        }
+      }
+    }).catch(() => {});
 
     showToast(`«${product.name}» (${actualAdded} عدد) به سبد خرید اضافه شد.`);
   };
@@ -485,59 +501,109 @@ export default function App() {
     scrollToCatalog();
   };
 
+  const isAdminRoute = currentPath === '/admin' || currentPath.startsWith('/admin/');
+
+  // 1. DEDICATED ADMIN ROUTE (/admin)
+  if (isAdminRoute) {
+    if (!isAdminLoggedIn) {
+      return (
+        <div className="min-h-screen bg-[#FAF7F0] text-[#231709] flex flex-col items-center justify-center p-4">
+          {toastMessage && (
+            <div className="fixed top-6 right-6 z-50 bg-[#231709] text-[#FAF7F0] px-4 py-3 rounded-2xl shadow-xl border border-[#D4A340]/60 flex items-center gap-2.5 text-xs sm:text-sm font-bold">
+              <Sparkles className="w-4 h-4 text-[#D4A340]" />
+              <span>{toastMessage}</span>
+            </div>
+          )}
+          <AdminLoginDialog
+            isOpen={true}
+            mode="page"
+            onClose={() => navigateTo('/')}
+            onReturnToStore={() => navigateTo('/')}
+            onSuccess={handleAdminLoginSuccess}
+          />
+        </div>
+      );
+    }
+
+    return (
+      <div className="min-h-screen bg-[#FAF7F0] text-[#231709]">
+        {toastMessage && (
+          <div className="fixed top-6 right-6 z-50 bg-[#231709] text-[#FAF7F0] px-4 py-3 rounded-2xl shadow-xl border border-[#D4A340]/60 flex items-center gap-2.5 text-xs sm:text-sm font-bold">
+            <Sparkles className="w-4 h-4 text-[#D4A340]" />
+            <span>{toastMessage}</span>
+          </div>
+        )}
+        <AdminModal
+          isOpen={true}
+          onClose={() => navigateTo('/')}
+          orders={orders}
+          products={products}
+          settings={settings}
+          onUpdateOrderStatus={handleUpdateOrderStatus}
+          onDeleteOrder={handleDeleteOrder}
+          onClearAllOrders={handleClearAllOrders}
+          onSaveProduct={handleSaveProduct}
+          onDeleteProduct={handleDeleteProduct}
+          onClearAllProducts={handleClearAllProducts}
+          onResetSampleProducts={handleResetSampleProducts}
+          onUpdateSettings={handleUpdateSettings}
+          onAuthChange={(isAuth, email) => {
+            setIsAdminLoggedIn(isAuth);
+            setAdminUserEmail(email || null);
+            if (!isAuth) {
+              navigateTo('/');
+            }
+          }}
+        />
+      </div>
+    );
+  }
+
+  // 2. PUBLIC STOREFRONT ROUTE (/)
   return (
     <div className="min-h-screen flex flex-col bg-[#FAF7F0] text-[#231709] w-full max-w-full overflow-x-hidden relative">
 
-      {/* Toast Alert */}
-      {toastMessage && (
-        <div className="fixed bottom-6 right-6 z-50 bg-[#231709] text-[#FAF7F0] px-4 py-3 rounded-2xl shadow-xl border border-[#D4A340]/60 flex items-center gap-2.5 text-xs sm:text-sm font-bold animate-in fade-in slide-in-from-bottom-4 duration-200">
-          <Sparkles className="w-4 h-4 text-[#D4A340]" />
-          <span>{toastMessage}</span>
+      {/* Intro Splash Animation (plays once per session, dynamic CMS texts) */}
+      <IntroSplash settings={settings} />
+
+      {/* Elegant Visual Toast & Cart-Added Feedback Bar */}
+      {addedFeedback && (
+        <div 
+          onClick={() => { setIsCartOpen(true); setAddedFeedback(null); }}
+          className="fixed bottom-5 right-4 left-4 sm:left-auto sm:right-6 sm:w-96 z-50 bg-[#163826] text-white p-3.5 rounded-2xl shadow-2xl border border-[#D4A340]/60 flex items-center justify-between gap-3 cursor-pointer animate-in fade-in slide-in-from-bottom-5 duration-300 hover:scale-[1.02] transition-transform"
+        >
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="relative w-11 h-11 rounded-xl overflow-hidden border border-[#D4A340]/40 shrink-0 bg-white">
+              <img src={addedFeedback.product.image} alt={addedFeedback.product.name} className="w-full h-full object-cover" />
+              <div className="absolute top-0 right-0 w-3.5 h-3.5 bg-emerald-500 rounded-bl flex items-center justify-center">
+                <CheckCircle2 className="w-2.5 h-2.5 text-white" />
+              </div>
+            </div>
+            <div className="min-w-0 text-right">
+              <span className="text-[11px] text-[#E8C574] font-bold block truncate">
+                به سبد خرید اضافه شد ({addedFeedback.quantity} عدد)
+              </span>
+              <h5 className="text-xs font-black text-white truncate">
+                {addedFeedback.product.name}
+              </h5>
+            </div>
+          </div>
+          <button 
+            type="button" 
+            className="px-3 py-1.5 rounded-xl bg-[#D4A340] hover:bg-[#B8860B] text-[#163826] text-xs font-black shrink-0 transition-all flex items-center gap-1 shadow-xs cursor-pointer"
+          >
+            <ShoppingBag className="w-3.5 h-3.5" />
+            <span>مشاهده سبد</span>
+          </button>
         </div>
       )}
 
-      {/* Sticky Admin Quick Access Bar when authenticated */}
-      {isAdminLoggedIn && (
-        <aside aria-label="نوار ابزار مدیریت" className="bg-gradient-to-r from-emerald-950 via-[#1E2D20] to-[#231709] text-white px-3 sm:px-6 py-2 border-b border-emerald-700/60 shadow-md flex items-center justify-between text-xs sm:text-sm z-50 sticky top-0">
-          <div className="flex items-center gap-2">
-            <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-ping shrink-0" />
-            <span className="font-black text-amber-300">دسترسی مدیریت فعال است</span>
-            {adminUserEmail && (
-              <span className="hidden sm:inline text-emerald-200 text-xs font-mono">({adminUserEmail})</span>
-            )}
-            <span className="text-[11px] text-gray-300 hidden md:inline">
-              | شما هم‌اکنون در حال مشاهده ویترین اصلی فروشگاه مانند خریداران هستید
-            </span>
-          </div>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => setIsAdminOpen(true)}
-              className="px-3 py-1.5 bg-amber-400 hover:bg-amber-300 active:scale-95 text-[#231709] font-black rounded-xl text-xs flex items-center gap-1.5 shadow-xs transition-all cursor-pointer"
-            >
-              <KeyRound className="w-3.5 h-3.5 text-[#231709]" />
-              <span>باز کردن پنل مدیریت</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                const token = sessionStorage.getItem('nama_admin_token');
-                if (token) {
-                  fetch('/api/admin/logout', {
-                    method: 'POST',
-                    headers: { 'Authorization': `Bearer ${token}` }
-                  }).catch(() => {});
-                }
-                sessionStorage.removeItem('nama_admin_token');
-                setIsAdminLoggedIn(false);
-                setAdminUserEmail(null);
-                showToast('از حساب مدیریت خارج شدید.');
-              }}
-              className="px-2.5 py-1 text-gray-300 hover:text-white hover:bg-white/10 rounded-lg text-xs transition-colors cursor-pointer"
-            >
-              خروج
-            </button>
-          </div>
-        </aside>
+      {/* Standard Toast Alert */}
+      {toastMessage && (
+        <div className="fixed bottom-20 sm:bottom-6 right-6 z-40 bg-[#231709] text-[#FAF7F0] px-4 py-3 rounded-2xl shadow-xl border border-[#D4A340]/60 flex items-center gap-2.5 text-xs sm:text-sm font-bold animate-in fade-in slide-in-from-bottom-4 duration-200">
+          <Sparkles className="w-4 h-4 text-[#D4A340]" />
+          <span>{toastMessage}</span>
+        </div>
       )}
 
       {/* Header */}
@@ -547,7 +613,7 @@ export default function App() {
         isCartBumping={isCartBumping}
         onOpenCart={() => setIsCartOpen(true)}
         onOpenTracking={() => setIsTrackingOpen(true)}
-        onOpenAdmin={handleOpenAdminTrigger}
+        onOpenAdmin={() => navigateTo('/admin')}
         searchQuery={searchQuery}
         onSearchChange={setSearchQuery}
         isAdminLoggedIn={isAdminLoggedIn}
@@ -654,13 +720,13 @@ export default function App() {
       <Footer
         settings={settings}
         onOpenTracking={() => setIsTrackingOpen(true)}
-        onOpenAdmin={handleOpenAdminTrigger}
+        onOpenAdmin={() => navigateTo('/admin')}
       />
 
       {/* Floating WhatsApp Quick Support Button */}
       <WhatsAppButton phone={settings.supportPhone || '+98 916 644 9409'} />
 
-      {/* MODALS */}
+      {/* MODALS (Customer Only) */}
       <ProductDetailModal
         product={selectedProduct}
         onClose={() => setSelectedProduct(null)}
@@ -690,33 +756,6 @@ export default function App() {
         onClose={() => setIsTrackingOpen(false)}
         onOrderUpdated={(upd) => {
           setOrders(prev => prev.map(o => o.id === upd.id ? upd : o));
-        }}
-      />
-
-      {/* Lightweight PIN Login Dialog (bypasses any OAuth or Google Auth) */}
-      <AdminLoginDialog
-        isOpen={isAdminLoginDialogOpen}
-        onClose={() => setIsAdminLoginDialogOpen(false)}
-        onSuccess={handleAdminLoginSuccess}
-      />
-
-      <AdminModal
-        isOpen={isAdminOpen}
-        onClose={() => setIsAdminOpen(false)}
-        orders={orders}
-        products={products}
-        settings={settings}
-        onUpdateOrderStatus={handleUpdateOrderStatus}
-        onDeleteOrder={handleDeleteOrder}
-        onClearAllOrders={handleClearAllOrders}
-        onSaveProduct={handleSaveProduct}
-        onDeleteProduct={handleDeleteProduct}
-        onClearAllProducts={handleClearAllProducts}
-        onResetSampleProducts={handleResetSampleProducts}
-        onUpdateSettings={handleUpdateSettings}
-        onAuthChange={(isAuth, email) => {
-          setIsAdminLoggedIn(isAuth);
-          setAdminUserEmail(email || null);
         }}
       />
     </div>

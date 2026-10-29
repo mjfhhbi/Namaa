@@ -20,12 +20,11 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({ className = '' }) => {
   const playTraditionalAudio = async () => {
     if (userHasMutedRef.current || !audioRef.current) return;
     try {
-      audioRef.current.volume = 0.4;
+      audioRef.current.volume = 0.38;
       await audioRef.current.play();
       setIsPlaying(true);
     } catch {
-      // Autoplay blocked by browser policy until first gesture
-      setIsPlaying(false);
+      // Browser autoplay policy might require a gesture; keep isPlaying true so it begins on first touch
     }
   };
 
@@ -42,7 +41,7 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({ className = '' }) => {
       // User explicitly re-enabled music
       userHasMutedRef.current = false;
       try {
-        audioRef.current.volume = 0.4;
+        audioRef.current.volume = 0.38;
         await audioRef.current.play();
         setIsPlaying(true);
       } catch (err) {
@@ -51,23 +50,32 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({ className = '' }) => {
     }
   };
 
-  // Autoplay on mount + one-time user interaction fallback
+  // Autoplay on mount + immediate user interaction unlock
   useEffect(() => {
     // Attempt direct autoplay
     playTraditionalAudio();
 
-    // Browser policy: if browser blocks initial autoplay, start on first user gesture
-    const handleFirstGesture = () => {
-      if (!userHasMutedRef.current && audioRef.current && audioRef.current.paused) {
+    // Browser policy: start on first user interaction anywhere on the screen
+    const handleGesture = () => {
+      if (!userHasMutedRef.current && audioRef.current) {
         playTraditionalAudio();
       }
     };
 
-    const events = ['click', 'touchstart', 'keydown', 'scroll'];
-    events.forEach(evt => window.addEventListener(evt, handleFirstGesture, { once: true, passive: true }));
+    const handleCustomPlay = () => {
+      if (!userHasMutedRef.current && audioRef.current) {
+        playTraditionalAudio();
+      }
+    };
+
+    window.addEventListener('nama_play_audio', handleCustomPlay);
+
+    const events = ['click', 'touchstart', 'touchend', 'pointerdown', 'keydown', 'scroll'];
+    events.forEach(evt => window.addEventListener(evt, handleGesture, { passive: true }));
 
     return () => {
-      events.forEach(evt => window.removeEventListener(evt, handleFirstGesture));
+      window.removeEventListener('nama_play_audio', handleCustomPlay);
+      events.forEach(evt => window.removeEventListener(evt, handleGesture));
       if (audioRef.current) {
         audioRef.current.pause();
       }

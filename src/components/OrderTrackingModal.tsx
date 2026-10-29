@@ -1,22 +1,23 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Order, OrderStatus } from '../types';
 import { 
   X, 
   Search, 
   Truck, 
   CheckCircle2, 
-  Clock, 
   Package, 
   AlertCircle, 
-  CreditCard, 
   ExternalLink,
-  PhoneCall,
-  MapPin,
-  Upload,
   Copy,
-  Check
+  Check,
+  FileText,
+  Info
 } from 'lucide-react';
-import { searchOrder, uploadOrderReceipt, getMyPlacedOrders } from '../services/storeService';
+import { 
+  searchOrderFlexible, 
+  uploadOrderReceipt, 
+  getMyPlacedOrders 
+} from '../services/storeService';
 import { compressImage } from '../utils/imageCompressor';
 
 interface OrderTrackingModalProps {
@@ -54,21 +55,12 @@ export const OrderTrackingModal: React.FC<OrderTrackingModalProps> = ({
   onOrderUpdated,
 }) => {
   const [query, setQuery] = useState('');
-  const [phone, setPhone] = useState('');
   const [loading, setLoading] = useState(false);
   const [order, setOrder] = useState<Order | null>(null);
   const [searched, setSearched] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [myRecentOrders, setMyRecentOrders] = useState<Order[]>([]);
-
-  // Load recent orders placed on this device
-  React.useEffect(() => {
-    if (isOpen) {
-      const recents = getMyPlacedOrders();
-      setMyRecentOrders(recents);
-    }
-  }, [isOpen]);
 
   // Late receipt upload state
   const [lateReceipt, setLateReceipt] = useState('');
@@ -78,7 +70,15 @@ export const OrderTrackingModal: React.FC<OrderTrackingModalProps> = ({
   const [lateError, setLateError] = useState<string | null>(null);
   const [isCompressingLate, setIsCompressingLate] = useState(false);
 
-  React.useEffect(() => {
+  // Load recent orders placed on this device
+  useEffect(() => {
+    if (isOpen) {
+      const recents = getMyPlacedOrders();
+      setMyRecentOrders(recents);
+    }
+  }, [isOpen]);
+
+  useEffect(() => {
     if (!isOpen) return;
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose();
@@ -87,47 +87,30 @@ export const OrderTrackingModal: React.FC<OrderTrackingModalProps> = ({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isOpen, onClose]);
 
-  const handleSearch = async (orderIdToSearch?: string, phoneToSearch?: string) => {
-    let rawId = (orderIdToSearch !== undefined ? orderIdToSearch : query).trim();
-    let rawPh = (phoneToSearch !== undefined ? phoneToSearch : phone).trim();
-
-    // Auto-fill from local orders if user only provided one
-    if (rawId && !rawPh) {
-      const recents = getMyPlacedOrders();
-      const match = recents.find(r => r.id.toUpperCase() === rawId.toUpperCase());
-      if (match?.customerPhone) {
-        rawPh = match.customerPhone;
-        setPhone(match.customerPhone);
-      }
-    } else if (!rawId && rawPh) {
-      const recents = getMyPlacedOrders();
-      const match = recents.find(r => r.customerPhone && r.customerPhone.endsWith(rawPh.slice(-7)));
-      if (match?.id) {
-        rawId = match.id;
-        setQuery(match.id);
-      }
-    }
+  // Search Handler: purely with Order ID (NM-...) or postal tracking code
+  const handleSearch = async (overrideCode?: string) => {
+    const rawId = (overrideCode !== undefined ? overrideCode : query).trim();
 
     if (!rawId) {
-      setSearchError('لطفاً کد سفارش خود (مانند NM-8492) را وارد فرمایید.');
-      return;
-    }
-    if (!rawPh) {
-      setSearchError('لطفاً شماره موبایل ۱۱ رقمی ثبت شده در سفارش (مانند ۰۹۱۲۳۴۵۶۷۸۹) را وارد فرمایید.');
+      setSearchError('لطفاً کد سفارش اختصاصی خود (مانند NM-...) یا شماره مرسوله پستی را وارد فرمایید.');
       return;
     }
 
     setLoading(true);
     setSearched(true);
     setSearchError(null);
+
     try {
-      const result = await searchOrder(rawId, rawPh);
-      setOrder(result);
-      if (!result) {
-        setSearchError('سفارشی با این مشخصات یافت نشد. لطفاً کد سفارش و شماره همراه را بررسی کنید.');
+      const res = await searchOrderFlexible({ code: rawId });
+
+      if (!res.order) {
+        setSearchError('سفارشی با این کد پیگیری در سامانه یافت نشد. لطفاً کد سفارش یا شماره مرسوله پستی را بررسی فرمایید.');
+        setOrder(null);
+      } else {
+        setOrder(res.order);
       }
     } catch (err: any) {
-      setSearchError(err?.message || 'خطا در استعلام سفارش');
+      setSearchError(err?.message || 'خطا در استعلام وضعیت سفارش.');
       setOrder(null);
     } finally {
       setLoading(false);
@@ -160,11 +143,6 @@ export const OrderTrackingModal: React.FC<OrderTrackingModalProps> = ({
 
   const handleSaveLateReceipt = async () => {
     if (!order) return;
-    const phoneToUse = phone.trim() || order.customerPhone || '';
-    if (!phoneToUse) {
-      setLateError('لطفاً شماره تلفن همراه ۱۱ رقمی ثبت شده در سفارش را وارد فرمایید.');
-      return;
-    }
     const receiptToUse = lateReceipt || order.receiptImage;
     if (!receiptToUse) {
       setLateError('لطفاً ابتدا تصویر فیش واریزی را انتخاب نمایید.');
@@ -176,7 +154,7 @@ export const OrderTrackingModal: React.FC<OrderTrackingModalProps> = ({
     try {
       await uploadOrderReceipt(
         order.id, 
-        phoneToUse, 
+        order.customerPhone || '', 
         receiptToUse, 
         lateCardLast4.trim() || order.cardLast4
       );
@@ -188,7 +166,7 @@ export const OrderTrackingModal: React.FC<OrderTrackingModalProps> = ({
       };
       setOrder(updated);
       if (onOrderUpdated) onOrderUpdated(updated);
-      setLateSuccessMessage('اطلاعات پرداخت با موفقیت ثبت شد و برای ادمین ارسال گردید.');
+      setLateSuccessMessage('اطلاعات پرداخت با موفقیت ثبت شد و برای کارشناس مالی ارسال گردید.');
       setTimeout(() => setLateSuccessMessage(null), 5000);
     } catch (e: any) {
       setLateError(e?.message || 'خطا در ثبت اطلاعات.');
@@ -234,7 +212,7 @@ export const OrderTrackingModal: React.FC<OrderTrackingModalProps> = ({
             </div>
             <div>
               <h3 className="text-base font-black text-[#163826]">پیگیری وضعیت سفارش</h3>
-              <p className="text-xs text-[#6F7F72]">استعلام با کد سفارش یا شماره موبایل</p>
+              <p className="text-xs text-[#6F7F72]">استعلام آنی با کد اختصاصی سفارش</p>
             </div>
           </div>
 
@@ -250,42 +228,40 @@ export const OrderTrackingModal: React.FC<OrderTrackingModalProps> = ({
           </button>
         </div>
 
-        <div className="p-5 sm:p-7 space-y-5 max-h-[80vh] overflow-y-auto">
-          {/* Search Inputs (Dual fields to ensure robust tracking) */}
-          <div className="bg-white p-4 sm:p-5 rounded-3xl border border-[#E7DDC9] shadow-xs space-y-3.5">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div className="space-y-1 text-right">
-                <label className="text-xs font-bold text-[#2C4030] block">
-                  کد سفارش:
-                </label>
+        <div className="p-4 sm:p-6 space-y-5 max-h-[80vh] overflow-y-auto">
+          {/* Tracking Form Box */}
+          <div className="bg-white p-4 sm:p-5 rounded-3xl border border-[#E7DDC9] shadow-xs space-y-4">
+            <div className="space-y-2 text-right">
+              <label className="text-xs font-bold text-[#2C4030] flex items-center gap-1.5">
+                <FileText className="w-4 h-4 text-[#163826]" />
+                <span>کد سفارش اختصاصی (NM) یا شماره مرسوله پستی:</span>
+              </label>
+
+              <div className="relative">
                 <input
                   type="text"
                   dir="ltr"
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
-                  placeholder="مثال: NM-8492"
-                  className="w-full bg-[#FAF8F3] border border-[#D5C6AC] rounded-2xl px-4 py-2.5 text-xs sm:text-sm text-[#163826] font-mono focus:outline-none focus:ring-2 focus:ring-[#163826]"
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      handleSearch();
+                    }
+                  }}
+                  placeholder="مثال: NM-XXXX-YYYY یا کد ۲۴ رقمی پست"
+                  className="w-full bg-[#FAF8F3] border border-[#D5C6AC] rounded-2xl px-4 py-3 text-xs sm:text-sm text-[#163826] font-mono font-bold focus:outline-none focus:ring-2 focus:ring-[#163826]"
                 />
               </div>
 
-              <div className="space-y-1 text-right">
-                <label className="text-xs font-bold text-[#2C4030] block">
-                  شماره موبایل خریدار:
-                </label>
-                <input
-                  type="tel"
-                  dir="ltr"
-                  value={phone}
-                  onChange={(e) => setPhone(e.target.value)}
-                  placeholder="مثال: ۰۹۱۲۳۴۵۶۷۸۹"
-                  className="w-full bg-[#FAF8F3] border border-[#D5C6AC] rounded-2xl px-4 py-2.5 text-xs sm:text-sm text-[#163826] font-mono focus:outline-none focus:ring-2 focus:ring-[#163826]"
-                />
-              </div>
+              <p className="text-[11px] text-[#788879] leading-relaxed">
+                کد سفارش بلافاصله پس از ثبت خرید در فاکتور شما درج شده و به شما نمایش داده می‌شود.
+              </p>
             </div>
 
             <button
               type="button"
-              disabled={loading}
+              disabled={loading || !query.trim()}
               onClick={(e) => {
                 e.preventDefault();
                 e.stopPropagation();
@@ -294,22 +270,31 @@ export const OrderTrackingModal: React.FC<OrderTrackingModalProps> = ({
               className="w-full py-3 rounded-2xl bg-[#163826] hover:bg-[#0E2619] active:scale-95 text-white text-xs sm:text-sm font-black shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
             >
               <Search className="w-4 h-4 text-amber-300" />
-              <span>{loading ? 'در حال استعلام از پایگاه داده...' : 'استعلام وضعیت سفارش'}</span>
+              <span>{loading ? 'در حال استعلام وضعیت سفارش...' : 'استعلام وضعیت با کد سفارش'}</span>
             </button>
 
+            {/* Error Message Display */}
             {searchError && (
               <div className="p-3 bg-red-50 border border-red-200 text-red-700 text-xs font-bold rounded-2xl flex items-center gap-2 text-right animate-in fade-in">
                 <AlertCircle className="w-4 h-4 text-red-600 shrink-0" />
                 <span>{searchError}</span>
               </div>
             )}
+
+            {/* Note regarding real SMS integration */}
+            <div className="bg-[#FAF8F3] p-3 rounded-2xl border border-[#EADFCB] flex items-start gap-2 text-[11px] text-[#556959]">
+              <Info className="w-4 h-4 text-[#163826] shrink-0 mt-0.5" />
+              <span>
+                پیگیری با شماره موبایل به دلیل ضرورت ارسال پیامک OTP، پس از اتصال رسمی وب‌سرویس پیامکی فعال خواهد شد. در حال حاضر پیگیری مستقیم با کد سفارش NM فعال است.
+              </span>
+            </div>
           </div>
 
-          {/* Quick-track for recent orders on this device */}
+          {/* Quick-track for recent orders placed on this device */}
           {myRecentOrders.length > 0 && !order && (
             <div className="space-y-2 pt-1 text-right">
               <span className="text-xs font-bold text-[#718274] block">
-                سفارش‌های ثبت شده روی این دستگاه:
+                سفارش‌های ثبت شده روی این مرورگر:
               </span>
               <div className="flex flex-wrap gap-2">
                 {myRecentOrders.map((rec) => (
@@ -320,8 +305,7 @@ export const OrderTrackingModal: React.FC<OrderTrackingModalProps> = ({
                       e.preventDefault();
                       e.stopPropagation();
                       setQuery(rec.id);
-                      setPhone(rec.customerPhone);
-                      handleSearch(rec.id, rec.customerPhone);
+                      handleSearch(rec.id);
                     }}
                     className="px-3 py-1.5 rounded-xl bg-white border border-[#D5C6AC] hover:border-[#163826] text-xs font-bold text-[#163826] flex items-center gap-1.5 cursor-pointer shadow-xs active:scale-95 transition-all"
                   >
@@ -338,21 +322,21 @@ export const OrderTrackingModal: React.FC<OrderTrackingModalProps> = ({
           {loading ? (
             <div className="py-12 text-center text-sm text-[#6F7F72] flex items-center justify-center gap-2">
               <div className="w-5 h-5 border-2 border-[#163826] border-t-transparent rounded-full animate-spin" />
-              <span>در حال جستجو و استعلام اطلاعات...</span>
+              <span>در حال استعلام وضعیت سفارش از پایگاه داده...</span>
             </div>
           ) : order ? (
-            <div className="space-y-6">
+            <div className="space-y-5 animate-in fade-in">
               {/* Order Status Banner */}
               <div className="bg-white p-4 sm:p-5 rounded-3xl border border-[#E7DDC9] shadow-xs">
                 <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-[#F0E6D5]">
                   <div>
-                    <span className="text-xs text-[#718274] block">کد سفارش:</span>
+                    <span className="text-xs text-[#718274] block">کد رهگیری سفارش:</span>
                     <span className="text-lg font-mono font-black text-[#163826]">
                       {order.id}
                     </span>
                   </div>
                   <div className="text-left">
-                    <span className="text-xs text-[#718274] block">تاریخ ثبت:</span>
+                    <span className="text-xs text-[#718274] block">تاریخ ثبت سفارش:</span>
                     <span className="text-xs font-semibold text-[#2C4030]">
                       {new Date(order.createdAt).toLocaleDateString('fa-IR')}
                     </span>
@@ -361,7 +345,7 @@ export const OrderTrackingModal: React.FC<OrderTrackingModalProps> = ({
 
                 {/* Tracking Progress Timeline */}
                 <div className="py-5">
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
                     {STATUS_STEPS.map((step, idx) => {
                       const isCompleted = idx <= activeStepIdx;
                       const isCurrent = idx === activeStepIdx;
@@ -370,7 +354,7 @@ export const OrderTrackingModal: React.FC<OrderTrackingModalProps> = ({
                           key={step.status} 
                           className={`p-3 rounded-2xl border text-center transition-all ${
                             isCurrent
-                              ? 'bg-[#EBF4E8] border-[#163826] shadow-sm'
+                              ? 'bg-[#EBF4E8] border-[#163826] shadow-xs'
                               : isCompleted
                               ? 'bg-[#FAF8F3] border-[#C8DAC3]'
                               : 'bg-gray-50 border-gray-200 opacity-60'
@@ -420,7 +404,7 @@ export const OrderTrackingModal: React.FC<OrderTrackingModalProps> = ({
                             setCopied(true);
                             setTimeout(() => setCopied(false), 2000);
                           }}
-                          className="px-3 py-1.5 rounded-lg bg-white border border-[#D5C6AC] text-xs font-semibold flex items-center gap-1"
+                          className="px-3 py-1.5 rounded-lg bg-white border border-[#D5C6AC] text-xs font-semibold flex items-center gap-1 cursor-pointer"
                         >
                           {copied ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
                           <span>{copied ? 'کپی شد' : 'کپی کد'}</span>
@@ -493,7 +477,7 @@ export const OrderTrackingModal: React.FC<OrderTrackingModalProps> = ({
                     <button
                       onClick={handleSaveLateReceipt}
                       disabled={isUpdatingReceipt || isCompressingLate}
-                      className="w-full py-2 bg-[#163826] hover:bg-[#0E2619] disabled:bg-gray-400 text-white rounded-xl text-xs font-bold transition-all"
+                      className="w-full py-2 bg-[#163826] hover:bg-[#0E2619] disabled:bg-gray-400 text-white rounded-xl text-xs font-bold transition-all cursor-pointer"
                     >
                       {isUpdatingReceipt ? 'در حال ثبت...' : 'ثبت فیش واریز'}
                     </button>
@@ -501,50 +485,63 @@ export const OrderTrackingModal: React.FC<OrderTrackingModalProps> = ({
                 </div>
               )}
 
-              {/* Order Items & Address */}
+              {/* Order Items & Breakdown */}
               <div className="bg-white p-4 sm:p-5 rounded-3xl border border-[#E7DDC9] space-y-3">
                 <h4 className="text-xs font-bold text-[#163826]">اقلام سفارش:</h4>
                 <div className="divide-y divide-[#F0E6D5]">
-                  {order.items.map((item, i) => (
+                  {(order.items || []).map((item, i) => (
                     <div key={i} className="py-2.5 flex items-center justify-between text-xs">
                       <div className="flex items-center gap-2">
-                        <img src={item.image} alt={item.name} className="w-10 h-10 rounded-lg object-cover" />
+                        {item.image && (
+                          <img src={item.image} alt={item.name} className="w-10 h-10 rounded-lg object-cover" />
+                        )}
                         <div>
                           <span className="font-bold text-[#143220] block">{item.name}</span>
-                          <span className="text-[10px] text-[#768779]">{item.weight} × {item.quantity} عدد</span>
+                          <span className="text-[10px] text-[#768779]">{item.weight || 'استاندارد'} × {item.quantity} عدد</span>
                         </div>
                       </div>
                       <span className="font-bold text-[#163826]">
-                        {(item.price * item.quantity).toLocaleString('fa-IR')} تومان
+                        {((item.price || 0) * (item.quantity || 1)).toLocaleString('fa-IR')} تومان
                       </span>
                     </div>
                   ))}
                 </div>
 
-                <div className="pt-2 border-t border-[#F0E6D5] flex justify-between text-sm font-black text-[#163826]">
-                  <span>مبلغ کل پرداختی:</span>
-                  <span>{order.totalAmount.toLocaleString('fa-IR')} تومان</span>
+                <div className="pt-2 border-t border-[#F0E6D5] space-y-1.5 text-xs text-[#334637]">
+                  {order.subtotal && (
+                    <div className="flex justify-between">
+                      <span>جمع اقلام:</span>
+                      <span>{order.subtotal.toLocaleString('fa-IR')} تومان</span>
+                    </div>
+                  )}
+                  <div className="flex justify-between">
+                    <span>هزینه ارسال:</span>
+                    <span>{order.shippingCost === 0 ? 'رایگان' : `${(order.shippingCost || 0).toLocaleString('fa-IR')} تومان`}</span>
+                  </div>
+                  <div className="pt-1.5 border-t border-[#F0E6D5] flex justify-between text-sm font-black text-[#163826]">
+                    <span>مبلغ کل پرداختی:</span>
+                    <span>{(order.totalAmount || 0).toLocaleString('fa-IR')} تومان</span>
+                  </div>
                 </div>
               </div>
 
-              {/* Delivery Address Details */}
-              <div className="bg-[#FAF8F3] p-4 rounded-2xl border border-[#E4D7C2] text-xs text-[#334637] space-y-1">
-                <div><span className="font-bold">تحویل‌گیرنده:</span> {order.customerName} ({order.customerPhone})</div>
-                <div><span className="font-bold">آدرس پستی:</span> {order.province}، {order.city}، {order.address}</div>
-                {order.postalCode && <div><span className="font-bold">کد پستی:</span> {order.postalCode}</div>}
+              {/* Delivery Information (Sanitized for Privacy) */}
+              <div className="bg-[#FAF8F3] p-4 rounded-2xl border border-[#E4D7C2] text-xs text-[#334637] space-y-1.5">
+                <div><span className="font-bold">تحویل‌گیرنده:</span> {order.customerName}</div>
+                <div><span className="font-bold">مقصد ارسال:</span> {order.province || 'تهران'} - {order.city || '-'}</div>
               </div>
             </div>
           ) : searched ? (
             <div className="py-12 text-center">
               <AlertCircle className="w-10 h-10 text-amber-600 mx-auto mb-2" />
-              <p className="text-sm font-bold text-[#2A3E30] mb-1">سفارشی با این مشخصات یافت نشد</p>
+              <p className="text-sm font-bold text-[#2A3E30] mb-1">سفارشی با این کد پیگیری یافت نشد</p>
               <p className="text-xs text-[#6F7F72]">
-                لطفاً کد سفارش (مانند NM-7841) یا شماره موبایل ثبت شده را به درستی بررسی فرمایید.
+                لطفاً کد سفارش اختصاصی (NM-...) یا شماره مرسوله پستی را با دقت بررسی فرمایید.
               </p>
             </div>
           ) : (
             <div className="py-10 text-center text-xs text-[#6F7F72]">
-              کد سفارش دریافت شده در انتهای خرید را وارد کنید تا وضعیت لحظه‌ای مرسوله را مشاهده نمایید.
+              کد سفارش دریافت شده در پایان خرید (مانند NM-8492) را وارد نمایید تا آخرین وضعیت پردازش و ارسال پستی را مشاهده فرمایید.
             </div>
           )}
         </div>

@@ -289,6 +289,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
   };
 
   const handleFinalSubmit = async (methodOverride?: 'card_to_card' | 'zarinpal') => {
+    if (isSubmitting) return; // Prevent duplicate order creations on repeated clicks
     const chosenMethod = methodOverride || paymentMethodChoice;
 
     // Re-verify Step 1 before allowing final submit
@@ -768,40 +769,57 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                 </div>
               )}
 
-              {/* Payment Method Selector */}
-              <div className="grid grid-cols-2 gap-3">
-                <button
-                  type="button"
-                  onClick={() => setPaymentMethodChoice('zarinpal')}
-                  className={`p-3.5 rounded-2xl border-2 transition-all flex flex-col items-center justify-center gap-1.5 cursor-pointer text-center ${
-                    paymentMethodChoice === 'zarinpal'
-                      ? 'border-[#D4A340] bg-[#FAF3E3] text-[#231709] shadow-md ring-2 ring-[#D4A340]/40'
-                      : 'border-[#E3DAC8] bg-white text-gray-600 hover:border-[#D4A340]/50'
-                  }`}
-                >
-                  <div className="flex items-center gap-1.5 font-black text-xs sm:text-sm text-[#231709]">
-                    <span className="w-2.5 h-2.5 rounded-full bg-amber-500 animate-pulse" />
-                    <span>درگاه پرداخت زرین‌پال</span>
-                  </div>
-                  <span className="text-[10px] text-gray-500 font-medium">پرداخت آنلاین و آنی با کلیه کارت‌های شتاب</span>
-                </button>
+              {/* Payment Method Section: Only active/connected methods are displayed */}
+              {Boolean(settings.zarinpalEnabled && settings.zarinpalMerchantId && settings.zarinpalMerchantId.trim().length >= 8) ? (
+                <div className="grid grid-cols-2 gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setPaymentMethodChoice('zarinpal')}
+                    className={`p-3.5 rounded-2xl border-2 transition-all flex flex-col items-center justify-center gap-1.5 cursor-pointer text-center ${
+                      paymentMethodChoice === 'zarinpal'
+                        ? 'border-[#D4A340] bg-[#FAF3E3] text-[#231709] shadow-md ring-2 ring-[#D4A340]/40'
+                        : 'border-[#E3DAC8] bg-white text-gray-600 hover:border-[#D4A340]/50'
+                    }`}
+                  >
+                    <div className="flex items-center gap-1.5 font-black text-xs sm:text-sm text-[#231709]">
+                      <span className="w-2.5 h-2.5 rounded-full bg-amber-500 animate-pulse" />
+                      <span>درگاه پرداخت زرین‌پال</span>
+                    </div>
+                    <span className="text-[10px] text-gray-500 font-medium">پرداخت آنلاین و آنی با کلیه کارت‌های شتاب</span>
+                  </button>
 
-                <button
-                  type="button"
-                  onClick={() => setPaymentMethodChoice('card_to_card')}
-                  className={`p-3.5 rounded-2xl border-2 transition-all flex flex-col items-center justify-center gap-1.5 cursor-pointer text-center ${
-                    paymentMethodChoice === 'card_to_card'
-                      ? 'border-[#163826] bg-[#EBF3E8] text-[#163826] shadow-md ring-2 ring-[#163826]/30'
-                      : 'border-[#E3DAC8] bg-white text-gray-600 hover:border-[#163826]/40'
-                  }`}
-                >
-                  <div className="flex items-center gap-1.5 font-black text-xs sm:text-sm">
-                    <CreditCard className="w-3.5 h-3.5 text-[#163826]" />
-                    <span>کارت به کارت بانکی</span>
+                  <button
+                    type="button"
+                    onClick={() => setPaymentMethodChoice('card_to_card')}
+                    className={`p-3.5 rounded-2xl border-2 transition-all flex flex-col items-center justify-center gap-1.5 cursor-pointer text-center ${
+                      paymentMethodChoice === 'card_to_card'
+                        ? 'border-[#163826] bg-[#EBF3E8] text-[#163826] shadow-md ring-2 ring-[#163826]/30'
+                        : 'border-[#E3DAC8] bg-white text-gray-600 hover:border-[#163826]/40'
+                    }`}
+                  >
+                    <div className="flex items-center gap-1.5 font-black text-xs sm:text-sm">
+                      <CreditCard className="w-3.5 h-3.5 text-[#163826]" />
+                      <span>کارت به کارت بانکی</span>
+                    </div>
+                    <span className="text-[10px] text-gray-500 font-medium">واریز به حساب و بارگذاری فیش</span>
+                  </button>
+                </div>
+              ) : (
+                <div className="bg-[#EBF3E8] border border-[#163826]/30 p-3.5 rounded-2xl flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <div className="w-9 h-9 rounded-xl bg-[#163826] text-[#D4A340] flex items-center justify-center shrink-0">
+                      <CreditCard className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <h4 className="text-xs sm:text-sm font-black text-[#163826]">روش پرداخت: کارت به کارت مستقیم بانکی</h4>
+                      <p className="text-[11px] text-[#4F6052]">واریز به شماره کارت رسمی فروشگاه ناما و بارگذاری تصویر رسید</p>
+                    </div>
                   </div>
-                  <span className="text-[10px] text-gray-500 font-medium">واریز به حساب و بارگذاری فیش</span>
-                </button>
-              </div>
+                  <span className="text-[10px] font-bold px-2 py-1 bg-white text-emerald-800 rounded-lg border border-emerald-200">
+                    فعال و معتبر
+                  </span>
+                </div>
+              )}
 
               {/* OPTION 1: ZARINPAL ONLINE GATEWAY */}
               {paymentMethodChoice === 'zarinpal' && (

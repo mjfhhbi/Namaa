@@ -49,11 +49,12 @@ import {
   Sliders,
   ShieldCheck
 } from 'lucide-react';
-import { sendNtfyNotification, fetchAdminSettings } from '../services/storeService';
+import { sendNtfyNotification, fetchAdminSettings, resendOrderNotification } from '../services/storeService';
 import { DEFAULT_STORE_SETTINGS as DEFAULT_SETTINGS, PRESET_PRODUCT_IMAGES as PRESET_IMAGE_OPTIONS } from '../types';
 import { compressImage } from '../utils/imageCompressor';
 import { doc, setDoc } from 'firebase/firestore';
 import { db } from '../firebase';
+import namaLogoImg from '../assets/images/nama_store_logo_1791976961130.webp';
 
 interface AdminModalProps {
   isOpen: boolean;
@@ -203,6 +204,8 @@ export const AdminModal: React.FC<AdminModalProps> = ({
   const [settingsActiveSubTab, setSettingsActiveSubTab] = useState<'general' | 'banking' | 'zarinpal' | 'shipping' | 'contact' | 'notifications' | 'deployment' | 'security' | 'backup'>('general');
   const [ntfyTestStatus, setNtfyTestStatus] = useState<string | null>(null);
   const [isTestingNtfy, setIsTestingNtfy] = useState(false);
+  const [resendingNtfyOrderId, setResendingNtfyOrderId] = useState<string | null>(null);
+  const [resendNtfyFeedback, setResendNtfyFeedback] = useState<{ id: string; message: string; isError?: boolean } | null>(null);
   const [saveSuccessMessage, setSaveSuccessMessage] = useState(false);
 
   // Password change state
@@ -290,6 +293,22 @@ export const AdminModal: React.FC<AdminModalProps> = ({
       setNtfyTestStatus(`خطا در ارسال: ${res.text}`);
     }
     setTimeout(() => setNtfyTestStatus(null), 6000);
+  };
+
+  // Re-send full order notification to ntfy from server
+  const handleResendNtfy = async (orderId: string) => {
+    setResendingNtfyOrderId(orderId);
+    setResendNtfyFeedback(null);
+    try {
+      const res = await resendOrderNotification(orderId);
+      setResendNtfyFeedback({ id: orderId, message: res.message || 'اعلان کامل سفارش با موفقیت به ntfy ارسال شد ✅' });
+      setTimeout(() => setResendNtfyFeedback(null), 5000);
+    } catch (err: any) {
+      setResendNtfyFeedback({ id: orderId, message: err.message || 'خطا در ارسال اعلان سفارش', isError: true });
+      setTimeout(() => setResendNtfyFeedback(null), 7000);
+    } finally {
+      setResendingNtfyOrderId(null);
+    }
   };
 
   // Save Settings
@@ -413,24 +432,13 @@ export const AdminModal: React.FC<AdminModalProps> = ({
   };
 
   const handleDeleteCategory = (catId: string) => {
-    const matchingProds = products.filter(p => p.category === catId);
     const catName = formSettings.customCategories?.find(c => c.id === catId)?.name || 'دسته‌بندی';
-    const warning = matchingProds.length > 0 
-      ? `توجه: تعداد ${matchingProds.length} محصول در این دسته قرار دارند. آیا از حذف دسته «${catName}» اطمینان دارید؟` 
-      : `آیا از حذف دسته‌بندی «${catName}» اطمینان دارید؟`;
-
-    setConfirmModal({
-      title: 'حذف دسته‌بندی',
-      message: warning,
-      confirmLabel: 'بله، حذف کن',
-      isDanger: true,
-      onConfirm: () => {
-        const updatedCats = (formSettings.customCategories || []).filter(c => c.id !== catId);
-        const newSettings = { ...formSettings, customCategories: updatedCats };
-        setFormSettings(newSettings);
-        onUpdateSettings(newSettings);
-      }
-    });
+    const updatedCats = (formSettings.customCategories || []).filter(c => c.id !== catId);
+    const newSettings = { ...formSettings, customCategories: updatedCats };
+    setFormSettings(newSettings);
+    onUpdateSettings(newSettings);
+    setSaveSuccessMessage(true);
+    setTimeout(() => setSaveSuccessMessage(false), 3500);
   };
 
   // Discount code management
@@ -864,6 +872,63 @@ export const AdminModal: React.FC<AdminModalProps> = ({
             {/* TAB CONTENT AREA */}
             <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-6">
               
+              {/* Executive Summary Status Card: مجموع فروش و تعداد کل محصولات */}
+              <div className="bg-gradient-to-r from-[#163826] via-[#1F3D2B] to-[#2A1D0E] text-white p-4 sm:p-5 rounded-3xl shadow-md border border-[#D4A340]/40 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-12 h-12 rounded-2xl bg-[#FAF8F3] p-1 flex items-center justify-center shrink-0 border border-[#D4A340]/50 shadow-sm">
+                    <img src={namaLogoImg} alt="لوگوی رسمی ناما" className="w-full h-full object-cover rounded-xl" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h4 className="text-sm sm:text-base font-black text-[#FAF7F0]">
+                        خلاصه وضعیت فروشگاه ناما
+                      </h4>
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-[#D4A340] text-[#231709]">
+                        آمار لحظه‌ای
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-gray-300 mt-0.5">
+                      اطلاعات کلی کاتالوگ محصولات و مجموع تراکنش‌های موفق
+                    </p>
+                  </div>
+                </div>
+
+                {/* Status Metrics Cards */}
+                <div className="grid grid-cols-2 sm:flex items-center gap-2.5 sm:gap-3">
+                  {/* 1. مجموع فروش */}
+                  <div className="bg-white/10 backdrop-blur-xs border border-white/15 px-3.5 py-2.5 rounded-2xl text-right sm:min-w-[155px]">
+                    <span className="text-[11px] text-[#E8C574] font-bold block mb-0.5">مجموع کل فروش:</span>
+                    <div className="flex items-baseline gap-1">
+                      <span className="text-base sm:text-lg font-black text-white">
+                        {totalApprovedSales.toLocaleString('fa-IR')}
+                      </span>
+                      <span className="text-[10px] text-gray-300">تومان</span>
+                    </div>
+                  </div>
+
+                  {/* 2. تعداد کل محصولات */}
+                  <div className="bg-white/10 backdrop-blur-xs border border-white/15 px-3.5 py-2.5 rounded-2xl text-right sm:min-w-[135px]">
+                    <span className="text-[11px] text-[#A5E3B2] font-bold block mb-0.5">تعداد کل محصولات:</span>
+                    <div className="flex items-baseline gap-1">
+                      <span className="text-base sm:text-lg font-black text-white">
+                        {products.length.toLocaleString('fa-IR')}
+                      </span>
+                      <span className="text-[10px] text-gray-300">قلم کالا</span>
+                    </div>
+                  </div>
+
+                  {/* 3. سفارشات نیازمند بررسی */}
+                  {pendingVerificationCount > 0 && (
+                    <div className="col-span-2 sm:col-span-1 bg-red-500/25 border border-red-400/50 px-3.5 py-2.5 rounded-2xl text-right">
+                      <span className="text-[11px] text-red-200 font-bold block mb-0.5">سفارش در انتظار:</span>
+                      <span className="text-base sm:text-lg font-black text-white">
+                        {pendingVerificationCount.toLocaleString('fa-IR')} عدد
+                      </span>
+                    </div>
+                  )}
+                </div>
+              </div>
+
               {/* TAB 1: DASHBOARD */}
               {activeTab === 'dashboard' && (
                 <div className="space-y-6">
@@ -1342,6 +1407,17 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                                     </button>
                                   </>
                                 )}
+
+                                <button
+                                  type="button"
+                                  onClick={() => handleResendNtfy(ord.id)}
+                                  disabled={resendingNtfyOrderId === ord.id}
+                                  className="px-3 py-1.5 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-900 text-xs font-bold border border-amber-300 transition-all flex items-center gap-1 cursor-pointer"
+                                  title="ارسال مجدد اعلان کامل سفارش به تاپیک اختصاصی ntfy"
+                                >
+                                  <BellRing className="w-3.5 h-3.5 text-amber-700" />
+                                  <span>{resendingNtfyOrderId === ord.id ? 'در حال ارسال...' : 'ارسال به ntfy'}</span>
+                                </button>
                               </div>
 
                               <div className="flex items-center gap-2 mr-auto">
@@ -1371,6 +1447,14 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                                 )}
                               </div>
                             </div>
+
+                            {resendNtfyFeedback && resendNtfyFeedback.id === ord.id && (
+                              <div className={`mt-2 p-2.5 rounded-xl text-xs font-bold ${
+                                resendNtfyFeedback.isError ? 'bg-red-50 text-red-700 border border-red-200' : 'bg-emerald-50 text-emerald-800 border border-emerald-200'
+                              }`}>
+                                {resendNtfyFeedback.message}
+                              </div>
+                            )}
                           </div>
                         );
                       })
@@ -1407,8 +1491,8 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                             const firstCat = formSettings.customCategories?.[0];
                             setEditingProduct({
                               name: '',
-                              category: firstCat ? firstCat.id : 'saffron',
-                              categoryLabel: firstCat ? firstCat.name : 'زعفران و زرشک اعلا',
+                              category: firstCat ? firstCat.id : 'general',
+                              categoryLabel: firstCat ? firstCat.name : 'عمومی',
                               price: 150000,
                               weight: 'بسته استاندارد',
                               stock: 25,
@@ -1417,7 +1501,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                               origin: 'ایران',
                               shortDesc: '',
                               description: '',
-                              image: PRESET_IMAGE_OPTIONS[0].url,
+                              image: PRESET_IMAGE_OPTIONS[0]?.url || '',
                             });
                           }}
                           className="flex-1 sm:flex-none px-4 py-2.5 rounded-2xl bg-emerald-700 hover:bg-emerald-800 active:scale-95 text-white text-xs sm:text-sm font-black shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer"
@@ -1550,17 +1634,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                                       setIsAddingNewCatInline(true);
                                     } else {
                                       const found = formSettings.customCategories?.find(c => c.id === val);
-                                      const fallbackLabels: Record<string, string> = {
-                                        saffron: 'زعفران و زرشک اعلا',
-                                        tea: 'چای و دمنوش‌های گیاهی',
-                                        spices: 'هل و ادویه‌جات ناب',
-                                        distillates: 'گلاب و عرقیات سنتی',
-                                        nuts: 'خشکبار و آجیل دستچین',
-                                        herbal: 'گیاهان دارویی و سلامت',
-                                        organic: 'محصولات ارگانیک و طبیعی',
-                                        other: 'سایر محصولات اصیل ناما',
-                                      };
-                                      const label = found ? found.name : (fallbackLabels[val] || val);
+                                      const label = found ? found.name : val;
                                       setEditingProduct({
                                         ...editingProduct,
                                         category: val,
@@ -1577,16 +1651,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                                       </option>
                                     ))
                                   ) : (
-                                    <>
-                                      <option value="saffron">✨ زعفران و زرشک اعلا</option>
-                                      <option value="tea">🍵 چای و دمنوش‌های گیاهی</option>
-                                      <option value="spices">🧂 هل و ادویه‌جات ناب</option>
-                                      <option value="distillates">🌸 گلاب و عرقیات سنتی</option>
-                                      <option value="nuts">🥜 خشکبار و آجیل دستچین</option>
-                                      <option value="herbal">🌿 گیاهان دارویی و سلامت</option>
-                                      <option value="organic">🍃 محصولات ارگانیک و طبیعی</option>
-                                      <option value="other">🍯 سایر محصولات اصیل ناما</option>
-                                    </>
+                                    <option value="">(دسته‌بندی جدیدی در تب دسته‌بندی‌ها بسازید یا در کادر زیر بنویسید)</option>
                                   )}
                                   <option value="__NEW__">➕ تایپ دسته‌بندی دلخواه جدید...</option>
                                 </select>
@@ -1917,7 +1982,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                           <option value="🍯">🍯 عسل</option>
                           <option value="🌴">🌴 خرما</option>
                           <option value="🥣">🥣 شیره</option>
-                          <option value="✨">✨ زعفران</option>
+                          <option value="✨">✨ اصیل و درخشان</option>
                           <option value="🫒">🫒 روغن</option>
                           <option value="🌰">🌰 خشکبار</option>
                           <option value="☕">☕ قهوه</option>
@@ -2395,7 +2460,191 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                       </div>
                     </div>
 
-                    <button
+                                        {/* Entrance Splash Screen Texts */}
+                    <div className="bg-white p-5 rounded-3xl border border-[#E7DDC9] space-y-4">
+                      <div className="flex items-center justify-between pb-2 border-b border-gray-100">
+                        <h4 className="font-black text-[#231709] text-sm flex items-center gap-2">
+                          <Sparkles className="w-4 h-4 text-[#D4A340]" />
+                          <span>صفحه و انیمیشن ورودی (Entrance / Splash Screen)</span>
+                        </h4>
+                        <div className="flex items-center gap-2">
+                          <label className="relative inline-flex items-center cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={formSettings.introEnabled !== false}
+                              onChange={(e) => setFormSettings({ ...formSettings, introEnabled: e.target.checked })}
+                              className="sr-only peer"
+                            />
+                            <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-600"></div>
+                          </label>
+                          <span className="text-xs font-bold text-gray-700">
+                            {formSettings.introEnabled !== false ? "فعال هنگام ورود" : "غیرفعال"}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-xs font-bold text-gray-700 mb-1">نشان بالای صفحه ورودی (Badge)</label>
+                          <input
+                            type="text"
+                            value={formSettings.introBadge || ""}
+                            onChange={(e) => setFormSettings({ ...formSettings, introBadge: e.target.value })}
+                            placeholder="مثال: محصولات غذایی اصیل و طبیعی"
+                            className="w-full bg-[#FAF8F3] border rounded-xl px-3 py-2 text-xs"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-xs font-bold text-gray-700 mb-1">عنوان اصلی ورودی (Title)</label>
+                          <input
+                            type="text"
+                            value={formSettings.introTitle || ""}
+                            onChange={(e) => setFormSettings({ ...formSettings, introTitle: e.target.value })}
+                            placeholder="مثال: فروشگاه مواد غذایی ناما"
+                            className="w-full bg-[#FAF8F3] border rounded-xl px-3 py-2 text-xs font-bold"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-xs font-bold text-gray-700 mb-1">شعار صفحه ورودی (Slogan)</label>
+                          <input
+                            type="text"
+                            value={formSettings.introSlogan || ""}
+                            onChange={(e) => setFormSettings({ ...formSettings, introSlogan: e.target.value })}
+                            placeholder="مثال: «از نام و جان، برای طعمی ماندگار»"
+                            className="w-full bg-[#FAF8F3] border rounded-xl px-3 py-2 text-xs text-[#A47922] font-bold"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-xs font-bold text-gray-700 mb-1">متن دکمه ورود (Button Text)</label>
+                          <input
+                            type="text"
+                            value={formSettings.introButtonText || ""}
+                            onChange={(e) => setFormSettings({ ...formSettings, introButtonText: e.target.value })}
+                            placeholder="مثال: ورود به فروشگاه"
+                            className="w-full bg-[#FAF8F3] border rounded-xl px-3 py-2 text-xs font-bold"
+                          />
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-bold text-gray-700 mb-1">زیرعنوان و توضیحات ورودی (Subtitle)</label>
+                        <input
+                          type="text"
+                          value={formSettings.introSubtitle || ""}
+                          onChange={(e) => setFormSettings({ ...formSettings, introSubtitle: e.target.value })}
+                          placeholder="مثال: دستچین اصیل‌ترین محصولات طبیعی ایران"
+                          className="w-full bg-[#FAF8F3] border rounded-xl px-3 py-2 text-xs"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Promo, Story & About Section */}
+                    <div className="bg-white p-5 rounded-3xl border border-[#E7DDC9] space-y-4">
+                      <h4 className="font-black text-[#231709] text-sm flex items-center gap-2">
+                        <Type className="w-4 h-4 text-[#D4A340]" />
+                        <span>بخش جشنواره، تعهد به اصالت و درباره ما</span>
+                      </h4>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-xs font-bold text-gray-700 mb-1">نشان بخش جشنواره (Promo Badge)</label>
+                          <input
+                            type="text"
+                            value={formSettings.promoBadge || ""}
+                            onChange={(e) => setFormSettings({ ...formSettings, promoBadge: e.target.value })}
+                            placeholder="مثال: جشنواره اصالت و سلامت ناما"
+                            className="w-full bg-[#FAF8F3] border rounded-xl px-3 py-2 text-xs"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-xs font-bold text-gray-700 mb-1">عنوان جشنواره (Promo Title)</label>
+                          <input
+                            type="text"
+                            value={formSettings.promoTitle || ""}
+                            onChange={(e) => setFormSettings({ ...formSettings, promoTitle: e.target.value })}
+                            placeholder="مثال: از نام و جان، برای طعمی ماندگار"
+                            className="w-full bg-[#FAF8F3] border rounded-xl px-3 py-2 text-xs font-bold"
+                          />
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-bold text-gray-700 mb-1">توضیحات تعهد و اصالت جشنواره</label>
+                        <textarea
+                          rows={2}
+                          value={formSettings.promoSubtitle || ""}
+                          onChange={(e) => setFormSettings({ ...formSettings, promoSubtitle: e.target.value })}
+                          placeholder="متن توضیحات تعهد و اصالت..."
+                          className="w-full bg-[#FAF8F3] border rounded-xl px-3 py-2 text-xs"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-bold text-gray-700 mb-1">متن کامل درباره فروشگاه ناما</label>
+                        <textarea
+                          rows={3}
+                          value={formSettings.aboutText || ""}
+                          onChange={(e) => setFormSettings({ ...formSettings, aboutText: e.target.value })}
+                          placeholder="متن کامل درباره فروشگاه و تاریخچه..."
+                          className="w-full bg-[#FAF8F3] border rounded-xl px-3 py-2 text-xs leading-relaxed"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Shipping & Store Closed Messages */}
+                    <div className="bg-white p-5 rounded-3xl border border-[#E7DDC9] space-y-4">
+                      <h4 className="font-black text-[#231709] text-sm flex items-center gap-2">
+                        <Truck className="w-4 h-4 text-[#2F4E34]" />
+                        <span>یادداشت ارسال و پیام تعطیلی موقت</span>
+                      </h4>
+
+                      <div>
+                        <label className="block text-xs font-bold text-gray-700 mb-1">یادداشت شرایط بسته‌بندی و ارسال پستی</label>
+                        <textarea
+                          rows={2}
+                          value={formSettings.shippingNote || ""}
+                          onChange={(e) => setFormSettings({ ...formSettings, shippingNote: e.target.value })}
+                          placeholder="مثال: ارسال با بسته‌بندی ایمن و ضربه‌گیر به سراسر ایران از طریق شرکت ملی پست جمهوری اسلامی ایران..."
+                          className="w-full bg-[#FAF8F3] border rounded-xl px-3 py-2 text-xs"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-bold text-gray-700 mb-1">پیام اطلاع‌رسانی هنگام تعطیلی موقت فروشگاه</label>
+                        <input
+                          type="text"
+                          value={formSettings.storeClosedMessage || ""}
+                          onChange={(e) => setFormSettings({ ...formSettings, storeClosedMessage: e.target.value })}
+                          placeholder="مثال: فروشگاه ناما در حال حاضر مشغول بروزرسانی موجودی انبار می‌باشد..."
+                          className="w-full bg-[#FAF8F3] border rounded-xl px-3 py-2 text-xs"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Footer & Copyright */}
+                    <div className="bg-white p-5 rounded-3xl border border-[#E7DDC9] space-y-4">
+                      <h4 className="font-black text-[#231709] text-sm flex items-center gap-2">
+                        <FileText className="w-4 h-4 text-[#D4A340]" />
+                        <span>متن کپی‌رایت و پاورقی انتهای صفحه (Footer)</span>
+                      </h4>
+
+                      <div>
+                        <label className="block text-xs font-bold text-gray-700 mb-1">متن حقوق و کپی‌رایت</label>
+                        <input
+                          type="text"
+                          value={formSettings.footerCopyright || ""}
+                          onChange={(e) => setFormSettings({ ...formSettings, footerCopyright: e.target.value })}
+                          placeholder="مثال: تمامی حقوق متعلق به فروشگاه محصولات غذایی ناما (NAMA FOOD PRODUCTS) می‌باشد."
+                          className="w-full bg-[#FAF8F3] border rounded-xl px-3 py-2 text-xs font-medium"
+                        />
+                      </div>
+                    </div>
+
+<button
                       type="submit"
                       className="w-full py-3.5 rounded-2xl bg-[#D4A340] hover:bg-[#B8860B] text-[#231709] font-black text-sm shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer"
                     >
@@ -3236,7 +3485,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                     <option value="🍯">🍯 عسل</option>
                     <option value="🌴">🌴 خرما</option>
                     <option value="🥣">🥣 شیره</option>
-                    <option value="✨">✨ زعفران</option>
+                    <option value="✨">✨ اصیل و درخشان</option>
                     <option value="🫒">🫒 روغن</option>
                     <option value="🌰">🌰 خشکبار</option>
                     <option value="☕">☕ قهوه</option>
