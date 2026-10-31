@@ -50,6 +50,7 @@ export type OrderStatus =
   | 'approved'               // واریز تایید شد
   | 'packaging'              // در حال بسته‌بندی بهداشتی
   | 'shipped'                // تحویل پست و ارسال شد
+  | 'refunded'               // مرجوع شده و عودت وجه انجام شد
   | 'cancelled';             // لغو شده
 
 export interface OrderItem {
@@ -63,6 +64,7 @@ export interface OrderItem {
 
 export interface Order {
   id: string; // e.g. "NM-8492"
+  shortCode?: string; // کد پیگیری عددی ۶ رقمی آسان برای خریدار (مثال: 583921)
   customerName: string;
   customerPhone: string;
   province: string;
@@ -81,6 +83,10 @@ export interface Order {
   receiptImage?: string; // base64 or URL
   trackingCode?: string; // Postal tracking code
   notes?: string;
+  refundStatus?: 'none' | 'requested' | 'approved' | 'refunded' | 'rejected';
+  refundNotes?: string; // یادداشت‌های داخلی مدیریت مربوط به مرجوعی و بازگشت وجه
+  refundAmount?: number;
+  refundDate?: string;
   discountCode?: string;
   discountAmount?: number;
   createdAt: string;
@@ -146,6 +152,23 @@ export interface StoreSettings {
   qualityBadge4?: string;
   customCategories?: ProductCategoryItem[];
   discountCodes?: DiscountCode[];
+  // متون شرایط بازگشت وجه، تسویه‌حساب و عناوین
+  refundPolicyTitle?: string;
+  refundPolicyText?: string;
+  adminLoginButtonText?: string;
+  checkoutTitle?: string;
+  checkoutSubtitle?: string;
+  checkoutSubmitButtonText?: string;
+  trackingModalTitle?: string;
+  trackingModalSubtitle?: string;
+  trackingInputPlaceholder?: string;
+  footerAboutTitle?: string;
+  footerAboutText?: string;
+  footerTrustTitle?: string;
+  footerTrustText?: string;
+  footerContactTitle?: string;
+  cartTitle?: string;
+  cartEmptyMessage?: string;
   // درگاه پرداخت آنلاین زرین‌پال
   zarinpalEnabled?: boolean;
   zarinpalMerchantId?: string; // کد ۳۶ کاراکتری مرچنت زرین‌پال
@@ -186,6 +209,23 @@ export const DEFAULT_STORE_SETTINGS: StoreSettings = {
   qualityBadge3: 'بسته‌بندی ایمن پستی',
   qualityBadge4: 'ارسال فوری سراسری',
   footerCopyright: 'تمامی حقوق متعلق به فروشگاه محصولات غذایی ناما (NAMA FOOD PRODUCTS) می‌باشد.',
+  // متون جدید قابل تنظیم
+  refundPolicyTitle: 'شرایط ضمانت و بازگشت وجه',
+  refundPolicyText: 'ضمانت ۷ روزه بازگشت بی‌قیدوشرط وجه در صورت هرگونه عدم رضایت از کیفیت، عطر، طعم یا سلامت بسته‌بندی محصولات ناما.',
+  adminLoginButtonText: 'ورود با رمز',
+  checkoutTitle: 'اطلاعات ارسال و تحویل‌گیرنده',
+  checkoutSubtitle: 'لطفاً مشخصات دقیق پستی را جهت ارسال سریع مرسوله با پست پیشتاز وارد نمایید.',
+  checkoutSubmitButtonText: 'تکمیل و ثبت نهایی سفارش',
+  trackingModalTitle: 'پیگیری وضعیت سفارش',
+  trackingModalSubtitle: 'استعلام لحظه‌ای وضعیت سفارش با کد پیگیری ۶ رقمی یا کد مرسوله پستی',
+  trackingInputPlaceholder: 'کد پیگیری ۶ رقمی سفارش (مثال: ۱۲۳۴۵۶)',
+  footerAboutTitle: 'درباره محصولات غذایی ناما',
+  footerAboutText: 'فروشگاه تخصصی محصولات طبیعی و سالم ناما با تعهد به خلوص و اصالت، مرغوب‌ترین خوراکی‌های سنتی ایران را مستقیم عرضه می‌کند.',
+  footerTrustTitle: 'ضمانت اصالت و سلامت',
+  footerTrustText: 'تمامی محصولات ناما با برگه آزمایش، تضمین ۱۰۰٪ اصالت و بسته‌بندی بهداشتی ایمن ارسال می‌گردند.',
+  footerContactTitle: 'ارتباط و پشتیبانی',
+  cartTitle: 'سبد خرید شما',
+  cartEmptyMessage: 'سبد خرید شما در حال حاضر خالی است.',
   customCategories: [],
   discountCodes: [],
   zarinpalEnabled: false,

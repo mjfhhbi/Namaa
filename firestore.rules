@@ -54,6 +54,11 @@ service cloud.firestore {
       allow write: if isAdmin();
     }
 
+    // 3.1 Short tracking codes registry (Admin SDK managed)
+    match /short_codes/{code} {
+      allow read, write: if isAdmin();
+    }
+
     // 4. Store settings
     // Public store info: store name, working hours, shipping costs, banners, social links, CMS texts
     match /settings/public {

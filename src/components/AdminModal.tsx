@@ -62,7 +62,7 @@ interface AdminModalProps {
   orders: Order[];
   products: Product[];
   settings: StoreSettings;
-  onUpdateOrderStatus: (orderId: string, status: OrderStatus, extras?: { trackingCode?: string }) => Promise<void> | void;
+  onUpdateOrderStatus: (orderId: string, status: OrderStatus, extras?: { trackingCode?: string; refundNotes?: string; refundStatus?: string; refundAmount?: number }) => Promise<void> | void;
   onDeleteOrder?: (orderId: string) => Promise<void> | void;
   onClearAllOrders?: () => Promise<void> | void;
   onSaveProduct: (product: Product) => Promise<void> | void;
@@ -166,12 +166,20 @@ export const AdminModal: React.FC<AdminModalProps> = ({
   };
 
   // Tabs
-  type TabType = 'dashboard' | 'orders' | 'products' | 'categories' | 'discounts' | 'customers' | 'cms' | 'settings';
+  type TabType = 'dashboard' | 'orders' | 'refunds' | 'products' | 'categories' | 'discounts' | 'customers' | 'cms' | 'settings';
   const [activeTab, setActiveTab] = useState<TabType>('products');
 
   // Orders Management States
   const [orderStatusFilter, setOrderStatusFilter] = useState<'all' | OrderStatus>('all');
   const [orderSearchQuery, setOrderSearchQuery] = useState('');
+
+  // Refunds & Returns Management States
+  const [refundSearchQuery, setRefundSearchQuery] = useState('');
+  const [refundFilter, setRefundFilter] = useState<'all' | 'refunded' | 'non_refunded'>('all');
+  const [editingRefundNoteOrderId, setEditingRefundNoteOrderId] = useState<string | null>(null);
+  const [refundNoteDraft, setRefundNoteDraft] = useState('');
+  const [isSavingRefundNote, setIsSavingRefundNote] = useState(false);
+  const [refundSuccessMessage, setRefundSuccessMessage] = useState<string | null>(null);
 
   // Product Edit/Create State (allows flexible string/number formatting during typing)
   const [editingProduct, setEditingProduct] = useState<(Omit<Partial<Product>, 'price' | 'originalPrice' | 'stock'> & { price?: any; originalPrice?: any; stock?: any }) | null>(null);
@@ -649,10 +657,30 @@ export const AdminModal: React.FC<AdminModalProps> = ({
     const q = orderSearchQuery.trim().toLowerCase();
     const matchesQuery = !q || 
       ord.id.toLowerCase().includes(q) ||
+      (ord.shortCode && ord.shortCode.includes(q)) ||
       ord.customerName.toLowerCase().includes(q) ||
       ord.customerPhone.includes(q) ||
       (ord.trackingCode && ord.trackingCode.includes(q));
     return matchesStatus && matchesQuery;
+  });
+
+  // Filtered Orders for dedicated Refunds/Returns Tab
+  const filteredRefundOrders = orders.filter(ord => {
+    const matchesFilter = 
+      refundFilter === 'all' ? true :
+      refundFilter === 'refunded' ? (ord.status === 'refunded' || ord.refundStatus === 'refunded') :
+      (ord.status !== 'refunded' && ord.refundStatus !== 'refunded');
+
+    const q = refundSearchQuery.trim().toLowerCase();
+    const matchesQuery = !q ||
+      ord.id.toLowerCase().includes(q) ||
+      (ord.shortCode && ord.shortCode.includes(q)) ||
+      ord.customerName.toLowerCase().includes(q) ||
+      ord.customerPhone.includes(q) ||
+      (ord.refundNotes && ord.refundNotes.toLowerCase().includes(q)) ||
+      (ord.trackingCode && ord.trackingCode.includes(q));
+
+    return matchesFilter && matchesQuery;
   });
 
   // Helper for Order Status Stepper calculations
@@ -668,6 +696,8 @@ export const AdminModal: React.FC<AdminModalProps> = ({
         return { step: 4, percent: 80, label: 'در حال بسته‌بندی در انبار', color: 'bg-amber-600' };
       case 'shipped':
         return { step: 5, percent: 100, label: 'تحویل پست و ارسال شد', color: 'bg-emerald-600' };
+      case 'refunded':
+        return { step: 0, percent: 100, label: 'مرجوع شده و عودت وجه', color: 'bg-rose-600' };
       case 'cancelled':
         return { step: 0, percent: 0, label: 'سفارش لغو شده', color: 'bg-gray-400' };
       default:
@@ -790,6 +820,23 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                 {pendingVerificationCount > 0 && (
                   <span className="bg-red-500 text-white text-[10px] font-black px-1.5 py-0.2 rounded-full animate-pulse">
                     {pendingVerificationCount} جدید
+                  </span>
+                )}
+              </button>
+
+              <button
+                onClick={() => setActiveTab('refunds')}
+                className={`py-3 px-3 text-xs sm:text-sm font-bold border-b-2 flex items-center gap-1.5 transition-all flex-shrink-0 cursor-pointer ${
+                  activeTab === 'refunds'
+                    ? 'border-rose-600 text-rose-700'
+                    : 'border-transparent text-gray-500 hover:text-gray-800'
+                }`}
+              >
+                <RotateCcw className="w-4 h-4 text-rose-600" />
+                <span>مرجوعی و بازگشت وجه</span>
+                {orders.filter(o => o.status === 'refunded' || o.refundStatus === 'requested').length > 0 && (
+                  <span className="bg-rose-500 text-white text-[10px] font-black px-1.5 py-0.2 rounded-full">
+                    {orders.filter(o => o.status === 'refunded' || o.refundStatus === 'requested').length}
                   </span>
                 )}
               </button>
@@ -1104,6 +1151,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                         <option value="approved">۳. ✓ واریز تایید شده</option>
                         <option value="packaging">۴. 📦 در حال بسته‌بندی</option>
                         <option value="shipped">۵. 🚚 ارسال شده با پست</option>
+                        <option value="refunded">↩️ مرجوع شده / عودت وجه</option>
                         <option value="cancelled">✕ لغو شده</option>
                       </select>
                     </div>
@@ -1142,15 +1190,21 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                           <div key={ord.id} className="bg-white rounded-3xl border border-[#E7DDC9] p-4 sm:p-6 space-y-4 shadow-xs">
                             {/* Order Header */}
                             <div className="flex flex-wrap items-center justify-between gap-2 border-b pb-3">
-                              <div className="flex items-center gap-3">
-                                <span className="text-lg font-mono font-black text-[#231709] bg-[#FAF8F3] px-3 py-1 rounded-xl border border-[#E8DEC9]">
+                              <div className="flex items-center gap-2">
+                                {ord.shortCode && (
+                                  <span className="text-xs font-mono font-black text-emerald-800 bg-emerald-50 px-2.5 py-1 rounded-xl border border-emerald-300" title="کد پیگیری ۶ رقمی خریدار">
+                                    کد ۶ رقمی: {ord.shortCode}
+                                  </span>
+                                )}
+                                <span className="text-base sm:text-lg font-mono font-black text-[#231709] bg-[#FAF8F3] px-3 py-1 rounded-xl border border-[#E8DEC9]">
                                   {ord.id}
                                 </span>
                                 <span className={`px-3 py-1 rounded-full text-xs font-bold flex items-center gap-1.5 ${
                                   ord.status === 'paid_pending_approval' ? 'bg-red-100 text-red-800 border border-red-300' :
                                   ord.status === 'approved' ? 'bg-blue-100 text-blue-800 border border-blue-300' :
                                   ord.status === 'packaging' ? 'bg-amber-100 text-amber-800 border border-amber-300' :
-                                  ord.status === 'shipped' ? 'bg-emerald-100 text-emerald-800 border border-emerald-300' : 'bg-gray-100'
+                                  ord.status === 'shipped' ? 'bg-emerald-100 text-emerald-800 border border-emerald-300' :
+                                  ord.status === 'refunded' ? 'bg-rose-100 text-rose-800 border border-rose-300' : 'bg-gray-100'
                                 }`}>
                                   <span className={`w-2 h-2 rounded-full ${progress.color} animate-pulse`} />
                                   <span>{progress.label}</span>
@@ -1422,6 +1476,17 @@ export const AdminModal: React.FC<AdminModalProps> = ({
 
                               <div className="flex items-center gap-2 mr-auto">
                                 <button
+                                  onClick={() => {
+                                    setActiveTab('refunds');
+                                    setRefundSearchQuery(ord.shortCode || ord.id);
+                                  }}
+                                  className="px-3 py-1.5 text-xs text-rose-700 hover:bg-rose-50 border border-rose-200 rounded-xl transition-all font-bold cursor-pointer"
+                                  title="مدیریت مرجوعی و بازگشت وجه این سفارش"
+                                >
+                                  مرجوعی / عودت وجه
+                                </button>
+
+                                <button
                                   onClick={() => onUpdateOrderStatus(ord.id, 'cancelled')}
                                   className="px-3 py-1.5 text-xs text-red-600 hover:bg-red-50 rounded-xl transition-all font-bold cursor-pointer"
                                 >
@@ -1455,6 +1520,302 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                                 {resendNtfyFeedback.message}
                               </div>
                             )}
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* TAB: DEDICATED REFUNDS & RETURNS MANAGEMENT */}
+              {activeTab === 'refunds' && (
+                <div className="space-y-4">
+                  {/* Top Notification Feedback */}
+                  {refundSuccessMessage && (
+                    <div className="bg-emerald-50 border border-emerald-300 text-emerald-800 p-3 rounded-2xl text-xs font-bold flex items-center gap-2 animate-in fade-in">
+                      <Check className="w-4 h-4 text-emerald-600" />
+                      <span>{refundSuccessMessage}</span>
+                    </div>
+                  )}
+
+                  {/* Summary Metric Cards */}
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div className="bg-white p-4 rounded-3xl border border-rose-200 shadow-xs flex items-center justify-between">
+                      <div>
+                        <span className="text-[11px] font-bold text-gray-500 block">تعداد سفارشات مرجوع شده</span>
+                        <span className="text-xl font-black text-rose-700 font-mono mt-0.5 block">
+                          {orders.filter(o => o.status === 'refunded' || o.refundStatus === 'refunded').length} سفارش
+                        </span>
+                      </div>
+                      <div className="w-10 h-10 rounded-2xl bg-rose-50 flex items-center justify-center text-rose-600">
+                        <RotateCcw className="w-5 h-5" />
+                      </div>
+                    </div>
+
+                    <div className="bg-white p-4 rounded-3xl border border-[#E7DDC9] shadow-xs flex items-center justify-between">
+                      <div>
+                        <span className="text-[11px] font-bold text-gray-500 block">مجموع مبالغ عودت داده شده</span>
+                        <span className="text-xl font-black text-amber-700 font-mono mt-0.5 block">
+                          {orders
+                            .filter(o => o.status === 'refunded' || o.refundStatus === 'refunded')
+                            .reduce((sum, o) => sum + (o.refundAmount || o.totalAmount), 0)
+                            .toLocaleString('fa-IR')} تومان
+                        </span>
+                      </div>
+                      <div className="w-10 h-10 rounded-2xl bg-amber-50 flex items-center justify-center text-amber-700">
+                        <CreditCard className="w-5 h-5" />
+                      </div>
+                    </div>
+
+                    <div className="bg-white p-4 rounded-3xl border border-blue-200 shadow-xs flex items-center justify-between">
+                      <div>
+                        <span className="text-[11px] font-bold text-gray-500 block">سفارشات فعال و جاری</span>
+                        <span className="text-xl font-black text-blue-700 font-mono mt-0.5 block">
+                          {orders.filter(o => o.status !== 'refunded' && o.status !== 'cancelled').length} سفارش
+                        </span>
+                      </div>
+                      <div className="w-10 h-10 rounded-2xl bg-blue-50 flex items-center justify-center text-blue-600">
+                        <Package className="w-5 h-5" />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Filter and Search Bar */}
+                  <div className="flex flex-wrap items-center justify-between gap-3 bg-white p-3.5 rounded-3xl border border-[#E7DDC9]">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <div className="relative">
+                        <input
+                          type="text"
+                          value={refundSearchQuery}
+                          onChange={(e) => setRefundSearchQuery(e.target.value)}
+                          placeholder="جستجو با کد ۶ رقمی، شناسه سفارش، شماره یا نام خریدار..."
+                          className="bg-[#FAF8F3] border rounded-xl pr-8 pl-3 py-1.5 text-xs w-72"
+                        />
+                        <Search className="w-3.5 h-3.5 text-gray-400 absolute right-2.5 top-1/2 -translate-y-1/2" />
+                      </div>
+
+                      <select
+                        value={refundFilter}
+                        onChange={(e) => setRefundFilter(e.target.value as any)}
+                        className="bg-[#FAF8F3] border rounded-xl px-2.5 py-1.5 text-xs font-bold text-[#231709]"
+                      >
+                        <option value="all">همه سفارش‌ها ({orders.length})</option>
+                        <option value="refunded">فقط مرجوع شده‌ها ({orders.filter(o => o.status === 'refunded' || o.refundStatus === 'refunded').length})</option>
+                        <option value="non_refunded">سفارشات بدون مرجوعی</option>
+                      </select>
+                    </div>
+
+                    <span className="text-xs text-gray-500">
+                      نمایش {filteredRefundOrders.length} مورد
+                    </span>
+                  </div>
+
+                  {/* Refunds Orders List */}
+                  <div className="space-y-4">
+                    {filteredRefundOrders.length === 0 ? (
+                      <div className="bg-white rounded-3xl border border-[#E7DDC9] p-12 text-center text-xs text-gray-500 space-y-2">
+                        <RotateCcw className="w-8 h-8 text-gray-300 mx-auto" />
+                        <p>سفارشی با معیارهای مرجوعی انتخاب شده یافت نشد.</p>
+                      </div>
+                    ) : (
+                      filteredRefundOrders.map((ord) => {
+                        const isRefunded = ord.status === 'refunded' || ord.refundStatus === 'refunded';
+
+                        return (
+                          <div 
+                            key={ord.id} 
+                            className={`rounded-3xl border p-4 sm:p-6 space-y-4 shadow-xs transition-all ${
+                              isRefunded ? 'bg-rose-50/40 border-rose-200' : 'bg-white border-[#E7DDC9]'
+                            }`}
+                          >
+                            {/* Header */}
+                            <div className="flex flex-wrap items-center justify-between gap-2 border-b pb-3">
+                              <div className="flex items-center gap-2">
+                                {ord.shortCode && (
+                                  <span className="text-xs font-mono font-black text-emerald-800 bg-emerald-50 px-2.5 py-1 rounded-xl border border-emerald-300">
+                                    کد ۶ رقمی: {ord.shortCode}
+                                  </span>
+                                )}
+                                <span className="text-sm font-mono font-black text-[#231709] bg-[#FAF8F3] px-3 py-1 rounded-xl border border-[#E8DEC9]">
+                                  {ord.id}
+                                </span>
+                                <span className={`px-3 py-1 rounded-full text-xs font-bold ${
+                                  isRefunded 
+                                    ? 'bg-rose-100 text-rose-800 border border-rose-300' 
+                                    : 'bg-gray-100 text-gray-700'
+                                }`}>
+                                  {isRefunded ? '↩️ مرجوع شده و عودت وجه' : 'جاری / فعال'}
+                                </span>
+                              </div>
+
+                              <div className="flex items-center gap-2">
+                                <span className="text-xs font-bold text-amber-800 font-mono">
+                                  مبلغ: {ord.totalAmount.toLocaleString('fa-IR')} تومان
+                                </span>
+                                <span className="text-xs text-gray-400 font-mono">
+                                  {new Date(ord.createdAt).toLocaleDateString('fa-IR')}
+                                </span>
+                              </div>
+                            </div>
+
+                            {/* Customer & Items Details */}
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+                              <div className="space-y-1.5 bg-[#FAF8F3] p-3 rounded-2xl border border-[#E8DEC9]">
+                                <div className="flex justify-between">
+                                  <span className="text-gray-500">خریدار:</span>
+                                  <span className="font-bold text-[#231709]">{ord.customerName}</span>
+                                </div>
+                                <div className="flex justify-between">
+                                  <span className="text-gray-500">شماره تماس:</span>
+                                  <a href={`tel:${ord.customerPhone}`} className="font-mono font-bold text-emerald-800 dir-ltr">
+                                    {ord.customerPhone}
+                                  </a>
+                                </div>
+                                <div className="flex justify-between">
+                                  <span className="text-gray-500">مقصد:</span>
+                                  <span className="text-gray-800">{ord.province} - {ord.city}</span>
+                                </div>
+                                <div className="text-gray-600 pt-1 border-t border-gray-200">
+                                  <span className="text-gray-400 block mb-0.5">آدرس:</span>
+                                  <p>{ord.address}</p>
+                                </div>
+                              </div>
+
+                              <div className="space-y-1.5 bg-[#FAF8F3] p-3 rounded-2xl border border-[#E8DEC9]">
+                                <span className="font-bold text-gray-700 block mb-1">اقلام این سفارش ({ord.items.length} قلم):</span>
+                                <div className="space-y-1 max-h-24 overflow-y-auto">
+                                  {ord.items.map((it, idx) => (
+                                    <div key={idx} className="flex justify-between text-[11px] text-gray-700">
+                                      <span>• {it.name} ({it.weight}) × {it.quantity}</span>
+                                      <span className="font-mono">{(it.price * it.quantity).toLocaleString('fa-IR')} تومان</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Internal Refund Notes Management */}
+                            <div className="bg-white p-3.5 rounded-2xl border border-[#E7DDC9] space-y-2">
+                              <div className="flex items-center justify-between">
+                                <label className="text-xs font-bold text-gray-800 flex items-center gap-1.5">
+                                  <RotateCcw className="w-3.5 h-3.5 text-rose-600" />
+                                  <span>یادداشت‌های داخلی بازگشت وجه و مرجوعی (فقط قابل مشاهده برای مدیریت):</span>
+                                </label>
+                                {editingRefundNoteOrderId !== ord.id && (
+                                  <button
+                                    onClick={() => {
+                                      setEditingRefundNoteOrderId(ord.id);
+                                      setRefundNoteDraft(ord.refundNotes || '');
+                                    }}
+                                    className="text-xs text-blue-700 font-bold hover:underline cursor-pointer"
+                                  >
+                                    {ord.refundNotes ? 'ویرایش یادداشت' : '+ افزودن یادداشت'}
+                                  </button>
+                                )}
+                              </div>
+
+                              {editingRefundNoteOrderId === ord.id ? (
+                                <div className="space-y-2 pt-1">
+                                  <textarea
+                                    rows={2}
+                                    value={refundNoteDraft}
+                                    onChange={(e) => setRefundNoteDraft(e.target.value)}
+                                    placeholder="علت مرجوعی، شماره شبا یا کارت مشتری، تاریخ انتقال وجه، وضعیت استرداد کالا به انبار..."
+                                    className="w-full bg-[#FAF8F3] border rounded-xl p-2.5 text-xs text-[#231709] focus:outline-none focus:ring-1 focus:ring-rose-500"
+                                  />
+                                  <div className="flex items-center justify-end gap-2">
+                                    <button
+                                      type="button"
+                                      onClick={() => setEditingRefundNoteOrderId(null)}
+                                      className="px-3 py-1 text-xs text-gray-600 hover:bg-gray-100 rounded-lg cursor-pointer"
+                                    >
+                                      انصراف
+                                    </button>
+                                    <button
+                                      type="button"
+                                      disabled={isSavingRefundNote}
+                                      onClick={async () => {
+                                        setIsSavingRefundNote(true);
+                                        try {
+                                          await onUpdateOrderStatus(ord.id, ord.status, {
+                                            refundNotes: refundNoteDraft.trim(),
+                                            refundStatus: isRefunded ? 'refunded' : undefined
+                                          });
+                                          ord.refundNotes = refundNoteDraft.trim();
+                                          setEditingRefundNoteOrderId(null);
+                                          setRefundSuccessMessage(`یادداشت مرجوعی برای سفارش ${ord.id} با موفقیت ذخیره شد.`);
+                                          setTimeout(() => setRefundSuccessMessage(null), 4000);
+                                        } finally {
+                                          setIsSavingRefundNote(false);
+                                        }
+                                      }}
+                                      className="px-3.5 py-1.5 bg-[#231709] hover:bg-[#150D05] text-white text-xs font-bold rounded-xl flex items-center gap-1 cursor-pointer"
+                                    >
+                                      <Save className="w-3.5 h-3.5 text-amber-300" />
+                                      <span>ذخیره یادداشت</span>
+                                    </button>
+                                  </div>
+                                </div>
+                              ) : (
+                                <p className="text-xs text-gray-600 bg-[#FAF8F3] p-2.5 rounded-xl border border-gray-200 min-h-[36px]">
+                                  {ord.refundNotes || <span className="text-gray-400 italic">هیچ یادداشت مرجوعی برای این سفارش ثبت نشده است.</span>}
+                                </p>
+                              )}
+                            </div>
+
+                            {/* Action Bar: Change Status */}
+                            <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t">
+                              <div className="flex items-center gap-2">
+                                <span className="text-xs font-bold text-gray-700">تغییر وضعیت مرجوعی:</span>
+                                {!isRefunded ? (
+                                  <button
+                                    onClick={() => {
+                                      setConfirmModal({
+                                        title: 'تأیید مرجوعی و بازگشت وجه',
+                                        message: `آیا مایلید وضعیت سفارش «${ord.id}» (مبلغ ${ord.totalAmount.toLocaleString('fa-IR')} تومان) را به «مرجوع شده و عودت وجه» تغییر دهید؟`,
+                                        confirmLabel: 'تأیید و ثبت مرجوعی',
+                                        isDanger: false,
+                                        onConfirm: async () => {
+                                          await onUpdateOrderStatus(ord.id, 'refunded', {
+                                            refundStatus: 'refunded',
+                                            refundAmount: ord.totalAmount,
+                                            refundNotes: ord.refundNotes || 'مرجوع شده با هماهنگی مشتری و عودت کامل وجه.'
+                                          });
+                                          setRefundSuccessMessage(`سفارش ${ord.id} با موفقیت به وضعیت مرجوع شده تغییر یافت.`);
+                                          setTimeout(() => setRefundSuccessMessage(null), 4000);
+                                        }
+                                      });
+                                    }}
+                                    className="px-3.5 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-xs"
+                                  >
+                                    <RotateCcw className="w-3.5 h-3.5" />
+                                    <span>ثبت وضعیت: مرجوع شده و بازگشت وجه</span>
+                                  </button>
+                                ) : (
+                                  <button
+                                    onClick={() => {
+                                      onUpdateOrderStatus(ord.id, 'approved', { refundStatus: 'none' });
+                                      setRefundSuccessMessage(`وضعیت سفارش ${ord.id} به تایید شده بازگردانده شد.`);
+                                      setTimeout(() => setRefundSuccessMessage(null), 4000);
+                                    }}
+                                    className="px-3.5 py-1.5 rounded-xl bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-bold transition-all cursor-pointer"
+                                  >
+                                    بازگردانی به سفارش فعال (لغو مرجوعی)
+                                  </button>
+                                )}
+                              </div>
+
+                              <button
+                                onClick={() => {
+                                  setActiveTab('orders');
+                                  setOrderSearchQuery(ord.shortCode || ord.id);
+                                }}
+                                className="text-xs text-blue-700 font-bold hover:underline flex items-center gap-1 cursor-pointer"
+                              >
+                                <span>مشاهده در تب رهگیری و سفارشات ←</span>
+                              </button>
+                            </div>
                           </div>
                         );
                       })
@@ -2625,26 +2986,204 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                       </div>
                     </div>
 
-                    {/* Footer & Copyright */}
+                    {/* Refund Policy & Guarantee CMS */}
                     <div className="bg-white p-5 rounded-3xl border border-[#E7DDC9] space-y-4">
                       <h4 className="font-black text-[#231709] text-sm flex items-center gap-2">
-                        <FileText className="w-4 h-4 text-[#D4A340]" />
-                        <span>متن کپی‌رایت و پاورقی انتهای صفحه (Footer)</span>
+                        <RotateCcw className="w-4 h-4 text-rose-600" />
+                        <span>شرایط و خط‌مشی بازگشت وجه و ضمانت (Refund & Returns Policy)</span>
                       </h4>
 
                       <div>
-                        <label className="block text-xs font-bold text-gray-700 mb-1">متن حقوق و کپی‌رایت</label>
+                        <label className="block text-xs font-bold text-gray-700 mb-1">عنوان ضمانت و بازگشت وجه</label>
                         <input
                           type="text"
-                          value={formSettings.footerCopyright || ""}
-                          onChange={(e) => setFormSettings({ ...formSettings, footerCopyright: e.target.value })}
-                          placeholder="مثال: تمامی حقوق متعلق به فروشگاه محصولات غذایی ناما (NAMA FOOD PRODUCTS) می‌باشد."
-                          className="w-full bg-[#FAF8F3] border rounded-xl px-3 py-2 text-xs font-medium"
+                          value={formSettings.refundPolicyTitle || ""}
+                          onChange={(e) => setFormSettings({ ...formSettings, refundPolicyTitle: e.target.value })}
+                          placeholder="مثال: ضمانت اصالت و بازگشت وجه ۷ روزه"
+                          className="w-full bg-[#FAF8F3] border rounded-xl px-3 py-2 text-xs font-bold"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-bold text-gray-700 mb-1">متن کامل شرایط بازگشت وجه و مرجوعی</label>
+                        <textarea
+                          rows={3}
+                          value={formSettings.refundPolicyText || ""}
+                          onChange={(e) => setFormSettings({ ...formSettings, refundPolicyText: e.target.value })}
+                          placeholder="توضیح شرایط بازگشت وجه در صورت عدم رضایت یا آسیب‌دیدگی محصول..."
+                          className="w-full bg-[#FAF8F3] border rounded-xl px-3 py-2 text-xs leading-relaxed"
                         />
                       </div>
                     </div>
 
-<button
+                    {/* Checkout & Order Completion CMS */}
+                    <div className="bg-white p-5 rounded-3xl border border-[#E7DDC9] space-y-4">
+                      <h4 className="font-black text-[#231709] text-sm flex items-center gap-2">
+                        <CreditCard className="w-4 h-4 text-[#2F4E34]" />
+                        <span>متون صفحه تسویه‌حساب و نهایی‌سازی سفارش (Checkout)</span>
+                      </h4>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-xs font-bold text-gray-700 mb-1">عنوان فرم تسویه‌حساب</label>
+                          <input
+                            type="text"
+                            value={formSettings.checkoutTitle || ""}
+                            onChange={(e) => setFormSettings({ ...formSettings, checkoutTitle: e.target.value })}
+                            placeholder="مثال: تکمیل خرید و ثبت نهایی سفارش"
+                            className="w-full bg-[#FAF8F3] border rounded-xl px-3 py-2 text-xs font-bold"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-xs font-bold text-gray-700 mb-1">متن دکمه ثبت نهایی سفارش</label>
+                          <input
+                            type="text"
+                            value={formSettings.checkoutSubmitButtonText || ""}
+                            onChange={(e) => setFormSettings({ ...formSettings, checkoutSubmitButtonText: e.target.value })}
+                            placeholder="مثال: ثبت نهایی و پرداخت سفارش"
+                            className="w-full bg-[#FAF8F3] border rounded-xl px-3 py-2 text-xs font-bold"
+                          />
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-bold text-gray-700 mb-1">توضیحات زیر عنوان فرم تسویه‌حساب</label>
+                        <input
+                          type="text"
+                          value={formSettings.checkoutSubtitle || ""}
+                          onChange={(e) => setFormSettings({ ...formSettings, checkoutSubtitle: e.target.value })}
+                          placeholder="مثال: لطفاً اطلاعات تماس و نشانی دقیق خود را جهت ارسال پستی وارد فرمایید"
+                          className="w-full bg-[#FAF8F3] border rounded-xl px-3 py-2 text-xs"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Order Tracking & Admin Login Button CMS */}
+                    <div className="bg-white p-5 rounded-3xl border border-[#E7DDC9] space-y-4">
+                      <h4 className="font-black text-[#231709] text-sm flex items-center gap-2">
+                        <KeyRound className="w-4 h-4 text-[#D4A340]" />
+                        <span>متون پیگیری سفارش و دکمه ورود مدیریت</span>
+                      </h4>
+
+                      <div>
+                        <label className="block text-xs font-bold text-gray-700 mb-1">
+                          متن دکمه ورود مدیریت در انتهای سایت (ورود با رمز)
+                        </label>
+                        <input
+                          type="text"
+                          value={formSettings.adminLoginButtonText || ""}
+                          onChange={(e) => setFormSettings({ ...formSettings, adminLoginButtonText: e.target.value })}
+                          placeholder="مثال: ورود با رمز یا پنل مدیریت فروشگاه"
+                          className="w-full bg-[#FAF8F3] border rounded-xl px-3 py-2 text-xs font-bold text-amber-900"
+                        />
+                        <p className="text-[11px] text-gray-500 mt-1">این متن برای دکمه مخفی/ورود مدیریت در پایین‌ترین بخش پاورقی سایت نمایش داده می‌شود.</p>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-xs font-bold text-gray-700 mb-1">عنوان پنجره پیگیری سفارش</label>
+                          <input
+                            type="text"
+                            value={formSettings.trackingModalTitle || ""}
+                            onChange={(e) => setFormSettings({ ...formSettings, trackingModalTitle: e.target.value })}
+                            placeholder="مثال: پیگیری لحظه‌ای سفارش"
+                            className="w-full bg-[#FAF8F3] border rounded-xl px-3 py-2 text-xs font-bold"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-xs font-bold text-gray-700 mb-1">راهنمای فیلد ورودی کد پیگیری (Placeholder)</label>
+                          <input
+                            type="text"
+                            value={formSettings.trackingInputPlaceholder || ""}
+                            onChange={(e) => setFormSettings({ ...formSettings, trackingInputPlaceholder: e.target.value })}
+                            placeholder="مثال: کد پیگیری ۶ رقمی یا شناسه سفارش NM..."
+                            className="w-full bg-[#FAF8F3] border rounded-xl px-3 py-2 text-xs"
+                          />
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-bold text-gray-700 mb-1">توضیحات راهنمای پنجره پیگیری</label>
+                        <input
+                          type="text"
+                          value={formSettings.trackingModalSubtitle || ""}
+                          onChange={(e) => setFormSettings({ ...formSettings, trackingModalSubtitle: e.target.value })}
+                          placeholder="مثال: کد پیگیری ۶ رقمی آسان دریافتی پس از ثبت سفارش را وارد فرمایید"
+                          className="w-full bg-[#FAF8F3] border rounded-xl px-3 py-2 text-xs"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Cart & Additional Footer Column Titles */}
+                    <div className="bg-white p-5 rounded-3xl border border-[#E7DDC9] space-y-4">
+                      <h4 className="font-black text-[#231709] text-sm flex items-center gap-2">
+                        <ShoppingBag className="w-4 h-4 text-[#2F4E34]" />
+                        <span>متون سبد خرید و عناوین ستون‌های پاورقی</span>
+                      </h4>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-xs font-bold text-gray-700 mb-1">عنوان سبد خرید</label>
+                          <input
+                            type="text"
+                            value={formSettings.cartTitle || ""}
+                            onChange={(e) => setFormSettings({ ...formSettings, cartTitle: e.target.value })}
+                            placeholder="مثال: سبد خرید شما"
+                            className="w-full bg-[#FAF8F3] border rounded-xl px-3 py-2 text-xs font-bold"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-xs font-bold text-gray-700 mb-1">پیام سبد خرید خالی</label>
+                          <input
+                            type="text"
+                            value={formSettings.cartEmptyMessage || ""}
+                            onChange={(e) => setFormSettings({ ...formSettings, cartEmptyMessage: e.target.value })}
+                            placeholder="مثال: سبد خرید شما خالی است"
+                            className="w-full bg-[#FAF8F3] border rounded-xl px-3 py-2 text-xs"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <div>
+                          <label className="block text-xs font-bold text-gray-700 mb-1">عنوان بخش درباره ما در پاورقی</label>
+                          <input
+                            type="text"
+                            value={formSettings.footerAboutTitle || ""}
+                            onChange={(e) => setFormSettings({ ...formSettings, footerAboutTitle: e.target.value })}
+                            placeholder="مثال: درباره محصولات غذایی ناما"
+                            className="w-full bg-[#FAF8F3] border rounded-xl px-3 py-2 text-xs"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-xs font-bold text-gray-700 mb-1">عنوان بخش ضمانت در پاورقی</label>
+                          <input
+                            type="text"
+                            value={formSettings.footerTrustTitle || ""}
+                            onChange={(e) => setFormSettings({ ...formSettings, footerTrustTitle: e.target.value })}
+                            placeholder="مثال: تضمین کیفیت و اصالت"
+                            className="w-full bg-[#FAF8F3] border rounded-xl px-3 py-2 text-xs"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-xs font-bold text-gray-700 mb-1">عنوان بخش تماس در پاورقی</label>
+                          <input
+                            type="text"
+                            value={formSettings.footerContactTitle || ""}
+                            onChange={(e) => setFormSettings({ ...formSettings, footerContactTitle: e.target.value })}
+                            placeholder="مثال: اطلاعات تماس و پشتیبانی"
+                            className="w-full bg-[#FAF8F3] border rounded-xl px-3 py-2 text-xs"
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    <button
                       type="submit"
                       className="w-full py-3.5 rounded-2xl bg-[#D4A340] hover:bg-[#B8860B] text-[#231709] font-black text-sm shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer"
                     >

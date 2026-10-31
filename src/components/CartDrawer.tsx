@@ -62,7 +62,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
               <ShoppingBag className="w-4 h-4" />
             </div>
             <div>
-              <h3 className="font-black text-[#163826] text-base">سبد خرید شما</h3>
+              <h3 className="font-black text-[#163826] text-base">{settings.cartTitle || 'سبد خرید شما'}</h3>
               <p className="text-xs text-[#6F7F72]">
                 {items.length > 0 ? `${items.reduce((s, i) => s + i.quantity, 0)} قلم کالا` : 'خالی است'}
               </p>
@@ -88,7 +88,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
               <div className="w-20 h-20 rounded-full bg-[#EAE2D2] flex items-center justify-center text-[#849586] mb-4">
                 <ShoppingBag className="w-10 h-10 stroke-1" />
               </div>
-              <p className="text-base font-bold text-[#2A3E30] mb-1">سبد خرید شما در حال حاضر خالی است</p>
+              <p className="text-base font-bold text-[#2A3E30] mb-1">{settings.cartEmptyMessage || 'سبد خرید شما در حال حاضر خالی است'}</p>
               <p className="text-xs text-[#6F7F72] max-w-xs mb-6">
                 از بخش کاتالوگ فروشگاه ناما، محصولات اصیل و سالم را به سبد خرید خود بیفزایید.
               </p>

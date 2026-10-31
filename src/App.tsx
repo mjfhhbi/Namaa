@@ -754,6 +754,7 @@ export default function App() {
       <OrderTrackingModal
         isOpen={isTrackingOpen}
         onClose={() => setIsTrackingOpen(false)}
+        settings={settings}
         onOrderUpdated={(upd) => {
           setOrders(prev => prev.map(o => o.id === upd.id ? upd : o));
         }}

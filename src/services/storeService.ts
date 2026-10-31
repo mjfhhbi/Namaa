@@ -620,7 +620,16 @@ export async function uploadOrderReceipt(
 export async function updateOrderStatus(
   orderId: string, 
   status: OrderStatus, 
-  extras?: { trackingCode?: string; receiptImage?: string; notes?: string; cardLast4?: string; paymentReference?: string }
+  extras?: { 
+    trackingCode?: string; 
+    receiptImage?: string; 
+    notes?: string; 
+    cardLast4?: string; 
+    paymentReference?: string;
+    refundNotes?: string;
+    refundStatus?: string;
+    refundAmount?: number;
+  }
 ): Promise<void> {
   let serverUpdated = false;
 
@@ -629,7 +638,14 @@ export async function updateOrderStatus(
     const res = await fetch('/api/admin/orders/update', {
       method: 'POST',
       headers: getAdminAuthHeaders(),
-      body: JSON.stringify({ orderId, status, trackingCode: extras?.trackingCode }),
+      body: JSON.stringify({ 
+        orderId, 
+        status, 
+        trackingCode: extras?.trackingCode,
+        refundNotes: extras?.refundNotes,
+        refundStatus: extras?.refundStatus,
+        refundAmount: extras?.refundAmount,
+      }),
     });
     if (res.ok) {
       serverUpdated = true;

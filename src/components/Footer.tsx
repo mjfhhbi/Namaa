@@ -46,17 +46,17 @@ export const Footer: React.FC<FooterProps> = ({
             </div>
 
             <p className="text-xs sm:text-sm text-[#DFD3C3] leading-relaxed max-w-sm">
-              {settings.aboutText || "فروشگاه تخصصی محصولات طبیعی و سالم ناما با پایبندی به شعار «از نام و جان برای طعمی ماندگار»، باکیفیت‌ترین خوراکی‌های اصیل و سنتی ایران را مستقیماً به سفره‌های پربرکت خانواده‌ها می‌رساند."}
+              {settings.footerAboutText || settings.aboutText || "فروشگاه تخصصی محصولات طبیعی و سالم ناما با پایبندی به شعار «از نام و جان برای طعمی ماندگار»، باکیفیت‌ترین خوراکی‌های اصیل و سنتی ایران را مستقیماً به سفره‌های پربرکت خانواده‌ها می‌رساند."}
             </p>
 
             <div className="flex flex-wrap items-center gap-3 pt-2">
               <div className="flex items-center gap-1.5 text-xs text-[#E8C574] font-bold bg-white/5 border border-white/10 px-3 py-1.5 rounded-xl">
                 <Award className="w-4 h-4 text-[#D4A340]" />
-                <span>ضمانت کیفیت و سلامت کالا</span>
+                <span>{settings.qualityBadge1 || "ضمانت کیفیت و سلامت کالا"}</span>
               </div>
-              <div className="flex items-center gap-1.5 text-xs text-emerald-300 font-bold bg-white/5 border border-white/10 px-3 py-1.5 rounded-xl">
+              <div className="flex items-center gap-1.5 text-xs text-emerald-300 font-bold bg-white/5 border border-white/10 px-3 py-1.5 rounded-xl" title={settings.refundPolicyText}>
                 <ShieldCheck className="w-4 h-4 text-emerald-400" />
-                <span>ضمانت اصالت و بازگشت وجه</span>
+                <span>{settings.refundPolicyTitle || "ضمانت اصالت و بازگشت وجه"}</span>
               </div>
             </div>
           </div>
@@ -84,7 +84,7 @@ export const Footer: React.FC<FooterProps> = ({
                   className="hover:text-amber-300 transition-colors flex items-center gap-1.5 text-gray-400 hover:text-gray-200 text-[11px] cursor-pointer"
                 >
                   <KeyRound className="w-3 h-3 text-amber-500" />
-                  <span>ورود مدیر</span>
+                  <span>{settings.adminLoginButtonText || 'ورود با رمز'}</span>
                 </button>
               </li>
             </ul>
@@ -93,7 +93,7 @@ export const Footer: React.FC<FooterProps> = ({
           {/* Contact & Socials */}
           <div className="md:col-span-4 space-y-3 text-right">
             <h4 className="text-sm font-black text-[#D4A340]">
-              ارتباط و پشتیبانی سفارشات
+              {settings.footerContactTitle || "ارتباط و پشتیبانی سفارشات"}
             </h4>
             <p className="text-xs text-gray-300 leading-relaxed">
               هرگونه سوال در رابطه با سفارشات، ارسال و خواص محصولات دارید با ما در ارتباط باشید:

@@ -128,6 +128,7 @@ export function formatOrderNotification(
   const lines = [
     `📦 مشخصات سفارش:`,
     `• شماره سفارش: ${order.id}`,
+    `• کد پیگیری ۶ رقمی آسان: ${order.shortCode || order.id}`,
     `• کد رهگیری پستی: ${postalTracking}`,
     `• زمان ثبت: ${jalaliDate}`,
     `• وضعیت فعلی سفارش: ${statusLabel}`,

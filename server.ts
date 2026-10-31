@@ -300,6 +300,22 @@ let serverSettingsCache: ServerSettingsState = {
     introSubtitle: 'دستچین اصیل‌ترین محصولات طبیعی ایران',
     introButtonText: 'ورود به فروشگاه',
     footerCopyright: 'تمامی حقوق متعلق به فروشگاه محصولات غذایی ناما (NAMA FOOD PRODUCTS) می‌باشد.',
+    refundPolicyTitle: 'شرایط ضمانت و بازگشت وجه',
+    refundPolicyText: 'ضمانت ۷ روزه بازگشت بی‌قیدوشرط وجه در صورت هرگونه عدم رضایت از کیفیت، عطر، طعم یا سلامت بسته‌بندی محصولات ناما.',
+    adminLoginButtonText: 'ورود با رمز',
+    checkoutTitle: 'اطلاعات ارسال و تحویل‌گیرنده',
+    checkoutSubtitle: 'لطفاً مشخصات دقیق پستی را جهت ارسال سریع مرسوله با پست پیشتاز وارد نمایید.',
+    checkoutSubmitButtonText: 'تکمیل و ثبت نهایی سفارش',
+    trackingModalTitle: 'پیگیری وضعیت سفارش',
+    trackingModalSubtitle: 'استعلام لحظه‌ای وضعیت سفارش با کد پیگیری ۶ رقمی یا کد مرسوله پستی',
+    trackingInputPlaceholder: 'کد پیگیری ۶ رقمی سفارش (مثال: ۱۲۳۴۵۶)',
+    footerAboutTitle: 'درباره محصولات غذایی ناما',
+    footerAboutText: 'فروشگاه تخصصی محصولات طبیعی و سالم ناما با تعهد به خلوص و اصالت، مرغوب‌ترین خوراکی‌های سنتی ایران را مستقیم عرضه می‌کند.',
+    footerTrustTitle: 'ضمانت اصالت و سلامت',
+    footerTrustText: 'تمامی محصولات ناما با برگه آزمایش، تضمین ۱۰۰٪ اصالت و بسته‌بندی بهداشتی ایمن ارسال می‌گردند.',
+    footerContactTitle: 'ارتباط و پشتیبانی',
+    cartTitle: 'سبد خرید شما',
+    cartEmptyMessage: 'سبد خرید شما در حال حاضر خالی است.',
     customCategories: []
   },
   private: {
@@ -511,9 +527,12 @@ function maskCustomerName(name: string): string {
 function sanitizeOrderForTracking(order: any) {
   return {
     id: order.id,
+    shortCode: order.shortCode || order.id,
     customerName: maskCustomerName(order.customerName),
     status: order.status,
     trackingCode: order.trackingCode || null,
+    refundStatus: order.refundStatus || (order.status === 'refunded' ? 'refunded' : undefined),
+    refundNotes: order.refundNotes || undefined,
     totalAmount: order.totalAmount,
     subtotal: order.subtotal,
     shippingCost: order.shippingCost,
@@ -534,7 +553,7 @@ function sanitizeOrderForTracking(order: any) {
 }
 
 /**
- * Searches for an order by Order ID or postal trackingCode across persistent cache and real-time Firestore.
+ * Searches for an order by 6-digit shortCode, Order ID, or postal trackingCode across persistent cache and real-time Firestore.
  */
 async function findOrderByTrackingCode(rawCode: string): Promise<any | null> {
   if (!rawCode) return null;
@@ -543,10 +562,13 @@ async function findOrderByTrackingCode(rawCode: string): Promise<any | null> {
   // 1. In-memory cache by Order ID
   let orderData = serverOrdersCache.get(cleanCode);
 
-  // 2. In-memory cache by postal tracking code
+  // 2. In-memory cache by 6-digit shortCode or postal tracking code
   if (!orderData) {
     for (const ord of serverOrdersCache.values()) {
-      if (ord.trackingCode && toEnglishDigits(String(ord.trackingCode)).trim().toUpperCase() === cleanCode) {
+      const shortMatch = ord.shortCode && toEnglishDigits(String(ord.shortCode)).trim().toUpperCase() === cleanCode;
+      const trackingMatch = ord.trackingCode && toEnglishDigits(String(ord.trackingCode)).trim().toUpperCase() === cleanCode;
+      const idMatch = ord.id && toEnglishDigits(String(ord.id)).trim().toUpperCase() === cleanCode;
+      if (shortMatch || trackingMatch || idMatch) {
         orderData = ord;
         break;
       }
@@ -565,7 +587,7 @@ async function findOrderByTrackingCode(rawCode: string): Promise<any | null> {
     } catch (_e) {}
   }
 
-  // 4. Query Admin Firestore if available
+  // 4. Query Admin Firestore if available (by ID, shortCode, or postal code)
   if (!orderData && adminDb) {
     try {
       const adminSnap = await adminDb.collection('orders').doc(cleanCode).get();
@@ -573,10 +595,18 @@ async function findOrderByTrackingCode(rawCode: string): Promise<any | null> {
         orderData = adminSnap.data();
         persistServerOrder(orderData);
       } else {
-        const querySnap = await adminDb.collection('orders').where('trackingCode', '==', cleanCode).limit(1).get();
-        if (!querySnap.empty) {
-          orderData = querySnap.docs[0].data();
+        // Query by 6-digit shortCode
+        const shortSnap = await adminDb.collection('orders').where('shortCode', '==', cleanCode).limit(1).get();
+        if (!shortSnap.empty) {
+          orderData = shortSnap.docs[0].data();
           persistServerOrder(orderData);
+        } else {
+          // Query by postal tracking code
+          const querySnap = await adminDb.collection('orders').where('trackingCode', '==', cleanCode).limit(1).get();
+          if (!querySnap.empty) {
+            orderData = querySnap.docs[0].data();
+            persistServerOrder(orderData);
+          }
         }
       }
     } catch (_e) {}
@@ -1079,6 +1109,11 @@ app.post('/api/admin/settings/update', requireAdminAuth, async (req, res) => {
       'heroBadge', 'heroTitle', 'heroSubtitle', 'heroButtonText',
       'promoBadge', 'promoTitle', 'promoSubtitle', 'aboutText',
       'qualityBadge1', 'qualityBadge2', 'qualityBadge3', 'qualityBadge4',
+      'refundPolicyTitle', 'refundPolicyText', 'adminLoginButtonText',
+      'checkoutTitle', 'checkoutSubtitle', 'checkoutSubmitButtonText',
+      'trackingModalTitle', 'trackingModalSubtitle', 'trackingInputPlaceholder',
+      'footerAboutTitle', 'footerAboutText', 'footerTrustTitle', 'footerTrustText', 'footerContactTitle',
+      'cartTitle', 'cartEmptyMessage',
       'customCategories', 'zarinpalEnabled', 'zarinpalSandbox'
     ];
 
@@ -1150,10 +1185,10 @@ app.get('/api/admin/orders', requireAdminAuth, async (_req, res) => {
   }
 });
 
-// Update order status & tracking
+// Update order status & tracking & refund notes
 app.post('/api/admin/orders/update', requireAdminAuth, async (req, res) => {
   try {
-    const { orderId, status, trackingCode } = req.body;
+    const { orderId, status, trackingCode, refundNotes, refundStatus, refundAmount } = req.body;
     if (!orderId || !status) {
       return res.status(400).json({ error: 'شناسه سفارش و وضعیت جدید الزامی است.' });
     }
@@ -1165,6 +1200,7 @@ app.post('/api/admin/orders/update', requireAdminAuth, async (req, res) => {
       'packaging',
       'shipped',
       'delivered',
+      'refunded',
       'cancelled'
     ];
     if (!VALID_ORDER_STATUSES.includes(status)) {
@@ -1177,6 +1213,21 @@ app.post('/api/admin/orders/update', requireAdminAuth, async (req, res) => {
     if (trackingCode !== undefined) {
       updateData.trackingCode = trackingCode;
     }
+    if (refundNotes !== undefined) {
+      updateData.refundNotes = refundNotes;
+    }
+    if (refundStatus !== undefined) {
+      updateData.refundStatus = refundStatus;
+    } else if (status === 'refunded') {
+      updateData.refundStatus = 'refunded';
+    }
+    if (refundAmount !== undefined && Number(refundAmount) >= 0) {
+      updateData.refundAmount = Number(refundAmount);
+    }
+    if (status === 'refunded' && !updateData.refundDate) {
+      updateData.refundDate = new Date().toISOString();
+    }
+
     const existing = serverOrdersCache.get(orderId.toUpperCase());
     if (existing) {
       Object.assign(existing, updateData);

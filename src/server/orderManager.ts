@@ -50,6 +50,12 @@ export function generateCollisionFreeOrderId(): string {
   return `NM-${timestampPart}-${randomPart}`;
 }
 
+export function generate6DigitTrackingCode(): string {
+  // Generates a cryptographically strong 6-digit numeric string (100000 - 999999)
+  const num = crypto.randomInt(100000, 999999);
+  return String(num);
+}
+
 export interface CreateOrderParams {
   customerName?: string;
   customerPhone?: string;
@@ -190,6 +196,7 @@ export async function processOrderCreation(
     }
 
     const orderId = generateCollisionFreeOrderId();
+    const shortCode = generate6DigitTrackingCode();
     let finalOrderData: any = null;
 
     // 4. Fail-Secure Gate: If adminDb is not provided and no server cache is configured, reject with 503
@@ -218,6 +225,16 @@ export async function processOrderCreation(
                 return;
               }
             }
+          }
+
+          // Ensure shortCode is unique across all orders
+          let assignedShortCode = shortCode;
+          let codeDoc = await transaction.get(adminDb.collection('short_codes').doc(assignedShortCode));
+          let attempts = 0;
+          while (codeDoc && codeDoc.exists && attempts < 10) {
+            assignedShortCode = generate6DigitTrackingCode();
+            codeDoc = await transaction.get(adminDb.collection('short_codes').doc(assignedShortCode));
+            attempts++;
           }
 
           const productDocs: { ref: any; data: any; requestedQty: number }[] = [];
@@ -290,6 +307,7 @@ export async function processOrderCreation(
 
           const newOrder: Record<string, any> = {
             id: orderId,
+            shortCode: assignedShortCode,
             idempotencyKey: effectiveKey,
             customerName: customerName.trim(),
             customerPhone: cleanPhone,
@@ -319,6 +337,12 @@ export async function processOrderCreation(
           transaction.set(orderRef, newOrder);
 
           transaction.set(idempRef, {
+            orderId,
+            createdAt: new Date().toISOString()
+          });
+
+          // Reserve unique shortCode document
+          transaction.set(adminDb.collection('short_codes').doc(assignedShortCode), {
             orderId,
             createdAt: new Date().toISOString()
           });
@@ -420,6 +444,7 @@ export async function processOrderCreation(
 
       const newOrder: Record<string, any> = {
         id: orderId,
+        shortCode,
         idempotencyKey: effectiveKey,
         customerName: customerName.trim(),
         customerPhone: cleanPhone,

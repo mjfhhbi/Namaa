@@ -97,10 +97,30 @@
           "type": "number",
           "description": "Final payable amount in Tomans"
         },
+        "shortCode": {
+          "type": "string",
+          "description": "Unique 6-digit numeric tracking code for customer order inquiry"
+        },
         "status": {
           "type": "string",
-          "enum": ["pending_receipt", "paid_pending_approval", "approved", "packaging", "shipped", "cancelled"],
+          "enum": ["pending_receipt", "paid_pending_approval", "approved", "packaging", "shipped", "cancelled", "refunded"],
           "description": "Current order lifecycle status"
+        },
+        "refundNotes": {
+          "type": "string",
+          "description": "Internal administrative notes and transaction reference for returns or refunds"
+        },
+        "refundStatus": {
+          "type": "string",
+          "description": "Status of the return/refund process"
+        },
+        "refundAmount": {
+          "type": "number",
+          "description": "Refunded amount in Tomans"
+        },
+        "refundDate": {
+          "type": "string",
+          "description": "Timestamp when refund was executed"
         },
         "paymentMethod": {
           "type": "string",

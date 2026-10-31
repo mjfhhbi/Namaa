@@ -381,12 +381,12 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
               </span>
               <div>
                 <h3 className="text-base font-black text-[#163826]">
-                  {step === 1 && 'مرحله ۱ از ۲: مشخصات و آدرس پستی'}
+                  {step === 1 && (settings.checkoutTitle || 'مرحله ۱ از ۲: مشخصات و آدرس پستی')}
                   {step === 2 && 'مرحله ۲ از ۲: پرداخت و ارسال فیش واریزی'}
                   {step === 3 && 'سفارش شما با موفقیت ثبت شد 🎉'}
                 </h3>
                 <p className="text-xs text-[#6F7F72]">
-                  {step === 1 && 'تکمیل دقیق تمامی فیلدها جهت ارسال مرسوله با پست پیشتاز الزامی است'}
+                  {step === 1 && (settings.checkoutSubtitle || 'تکمیل دقیق تمامی فیلدها جهت ارسال مرسوله با پست پیشتاز الزامی است')}
                   {step === 2 && 'کارت‌به‌کارت به حساب رسمی ناما و بارگذاری عکس رسید'}
                   {step === 3 && 'کد رهگیری اختصاصی برای پیگیری بسته تا زمان تحویل'}
                 </p>
@@ -1163,24 +1163,40 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                 </p>
               </div>
 
-              {/* Tracking Code Banner */}
-              <div className="bg-[#FAF5EC] border-2 border-[#E7D6B9] rounded-2xl p-4 max-w-sm mx-auto text-center shadow-xs">
-                <span className="text-xs text-[#718274] block mb-1">کد پیگیری اختصاصی سفارش شما:</span>
-                <div className="flex items-center justify-center gap-2">
-                  <span className="text-2xl sm:text-3xl font-mono font-black text-[#163826] tracking-wider">
-                    {createdOrder.id}
+              {/* 6-Digit Easy Tracking Code Banner */}
+              <div className="bg-[#FAF5EC] border-2 border-[#D4A340] rounded-3xl p-5 max-w-md mx-auto text-center shadow-md space-y-3">
+                <span className="text-xs font-bold text-[#8A5A12] block">
+                  کد پیگیری آسان ۶ رقمی شما (جهت استعلام در بالای سایت):
+                </span>
+                <div className="flex items-center justify-center gap-3 bg-white py-3 px-4 rounded-2xl border border-[#E7D6B9] shadow-inner">
+                  <span className="text-3xl sm:text-4xl font-mono font-black text-[#163826] tracking-widest">
+                    {createdOrder.shortCode || createdOrder.id}
                   </span>
                   <button
-                    onClick={() => copyToClipboard(createdOrder.id, 'orderId')}
-                    className="p-1.5 rounded-lg bg-white border border-[#D5C6AC] hover:bg-gray-50 text-xs flex items-center gap-1"
-                    title="کپی کد سفارش"
+                    onClick={() => copyToClipboard(createdOrder.shortCode || createdOrder.id, 'shortCode')}
+                    className="py-1.5 px-3 rounded-xl bg-[#FAF5EC] border border-[#D5C6AC] hover:bg-[#EFE6D4] text-xs font-bold text-[#163826] flex items-center gap-1.5 cursor-pointer transition-all active:scale-95"
+                    title="کپی کد ۶ رقمی"
                   >
-                    {copiedField === 'orderId' ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
+                    {copiedField === 'shortCode' ? (
+                      <>
+                        <Check className="w-4 h-4 text-emerald-600" />
+                        <span className="text-emerald-700">کپی شد</span>
+                      </>
+                    ) : (
+                      <>
+                        <Copy className="w-4 h-4 text-[#D4A340]" />
+                        <span>کپی کد</span>
+                      </>
+                    )}
                   </button>
                 </div>
-                <span className="text-[11px] text-[#839587] block mt-1">
-                  این کد را ذخیره فرمایید تا در بخش «پیگیری سفارش» وضعیت ارسال را بررسی کنید.
-                </span>
+                <div className="flex items-center justify-center gap-2 text-[11px] text-[#6F7F72]">
+                  <span>شناسه سیستمی سفارش:</span>
+                  <span className="font-mono font-bold text-gray-700">{createdOrder.id}</span>
+                </div>
+                <p className="text-[11px] text-[#2F4E34] font-medium leading-relaxed bg-[#EBF3E8] p-2.5 rounded-xl border border-[#BED7B7]/60">
+                  💡 مشتری گرامی، با وارد کردن همین <strong>کد ۶ رقمی آسان</strong> در دکمه «پیگیری سفارش» بالای سایت، وضعیت تایید فیش و کد مرسوله پستی خود را در هر لحظه مشاهده فرمایید.
+                </p>
               </div>
 
               {/* Order Info recap */}

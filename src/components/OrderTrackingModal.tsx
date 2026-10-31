@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Order, OrderStatus } from '../types';
+import { Order, OrderStatus, StoreSettings } from '../types';
 import { 
   X, 
   Search, 
@@ -7,11 +7,12 @@ import {
   CheckCircle2, 
   Package, 
   AlertCircle, 
-  ExternalLink,
-  Copy,
-  Check,
-  FileText,
-  Info
+  ExternalLink, 
+  Copy, 
+  Check, 
+  FileText, 
+  Info,
+  RotateCcw
 } from 'lucide-react';
 import { 
   searchOrderFlexible, 
@@ -24,6 +25,7 @@ interface OrderTrackingModalProps {
   isOpen: boolean;
   onClose: () => void;
   onOrderUpdated?: (order: Order) => void;
+  settings?: StoreSettings;
 }
 
 const STATUS_STEPS: { status: OrderStatus; label: string; desc: string }[] = [
@@ -53,6 +55,7 @@ export const OrderTrackingModal: React.FC<OrderTrackingModalProps> = ({
   isOpen,
   onClose,
   onOrderUpdated,
+  settings,
 }) => {
   const [query, setQuery] = useState('');
   const [loading, setLoading] = useState(false);
@@ -87,12 +90,12 @@ export const OrderTrackingModal: React.FC<OrderTrackingModalProps> = ({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isOpen, onClose]);
 
-  // Search Handler: purely with Order ID (NM-...) or postal tracking code
+  // Search Handler: with 6-digit code, Order ID, or postal tracking code
   const handleSearch = async (overrideCode?: string) => {
     const rawId = (overrideCode !== undefined ? overrideCode : query).trim();
 
     if (!rawId) {
-      setSearchError('لطفاً کد سفارش اختصاصی خود (مانند NM-...) یا شماره مرسوله پستی را وارد فرمایید.');
+      setSearchError('لطفاً کد ۶ رقمی سفارش (مثال: ۱۲۳۴۵۶) یا شماره مرسوله پستی را وارد فرمایید.');
       return;
     }
 
@@ -104,7 +107,7 @@ export const OrderTrackingModal: React.FC<OrderTrackingModalProps> = ({
       const res = await searchOrderFlexible({ code: rawId });
 
       if (!res.order) {
-        setSearchError('سفارشی با این کد پیگیری در سامانه یافت نشد. لطفاً کد سفارش یا شماره مرسوله پستی را بررسی فرمایید.');
+        setSearchError('سفارشی با این کد پیگیری در سامانه یافت نشد. لطفاً کد ۶ رقمی سفارش یا شماره مرسوله پستی را بررسی فرمایید.');
         setOrder(null);
       } else {
         setOrder(res.order);
@@ -211,8 +214,12 @@ export const OrderTrackingModal: React.FC<OrderTrackingModalProps> = ({
               <Truck className="w-4 h-4" />
             </div>
             <div>
-              <h3 className="text-base font-black text-[#163826]">پیگیری وضعیت سفارش</h3>
-              <p className="text-xs text-[#6F7F72]">استعلام آنی با کد اختصاصی سفارش</p>
+              <h3 className="text-base font-black text-[#163826]">
+                {settings?.trackingModalTitle || "پیگیری وضعیت سفارش"}
+              </h3>
+              <p className="text-xs text-[#6F7F72]">
+                {settings?.trackingModalSubtitle || "استعلام آنی با کد پیگیری ۶ رقمی یا کد مرسوله پستی"}
+              </p>
             </div>
           </div>
 
@@ -234,7 +241,7 @@ export const OrderTrackingModal: React.FC<OrderTrackingModalProps> = ({
             <div className="space-y-2 text-right">
               <label className="text-xs font-bold text-[#2C4030] flex items-center gap-1.5">
                 <FileText className="w-4 h-4 text-[#163826]" />
-                <span>کد سفارش اختصاصی (NM) یا شماره مرسوله پستی:</span>
+                <span>کد پیگیری ۶ رقمی سفارش یا شماره مرسوله پستی:</span>
               </label>
 
               <div className="relative">
@@ -249,13 +256,13 @@ export const OrderTrackingModal: React.FC<OrderTrackingModalProps> = ({
                       handleSearch();
                     }
                   }}
-                  placeholder="مثال: NM-XXXX-YYYY یا کد ۲۴ رقمی پست"
+                  placeholder={settings?.trackingInputPlaceholder || "کد ۶ رقمی سفارش (مثال: ۱۲۳۴۵۶) یا کد مرسوله پستی"}
                   className="w-full bg-[#FAF8F3] border border-[#D5C6AC] rounded-2xl px-4 py-3 text-xs sm:text-sm text-[#163826] font-mono font-bold focus:outline-none focus:ring-2 focus:ring-[#163826]"
                 />
               </div>
 
               <p className="text-[11px] text-[#788879] leading-relaxed">
-                کد سفارش بلافاصله پس از ثبت خرید در فاکتور شما درج شده و به شما نمایش داده می‌شود.
+                کد پیگیری ۶ رقمی پس از تکمیل سفارش به شما نمایش داده شده است. همچنین می‌توانید با شماره مرسوله پستی استعلام بگیرید.
               </p>
             </div>
 
@@ -270,7 +277,7 @@ export const OrderTrackingModal: React.FC<OrderTrackingModalProps> = ({
               className="w-full py-3 rounded-2xl bg-[#163826] hover:bg-[#0E2619] active:scale-95 text-white text-xs sm:text-sm font-black shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
             >
               <Search className="w-4 h-4 text-amber-300" />
-              <span>{loading ? 'در حال استعلام وضعیت سفارش...' : 'استعلام وضعیت با کد سفارش'}</span>
+              <span>{loading ? 'در حال استعلام وضعیت سفارش...' : 'استعلام وضعیت سفارش'}</span>
             </button>
 
             {/* Error Message Display */}
@@ -285,7 +292,7 @@ export const OrderTrackingModal: React.FC<OrderTrackingModalProps> = ({
             <div className="bg-[#FAF8F3] p-3 rounded-2xl border border-[#EADFCB] flex items-start gap-2 text-[11px] text-[#556959]">
               <Info className="w-4 h-4 text-[#163826] shrink-0 mt-0.5" />
               <span>
-                پیگیری با شماره موبایل به دلیل ضرورت ارسال پیامک OTP، پس از اتصال رسمی وب‌سرویس پیامکی فعال خواهد شد. در حال حاضر پیگیری مستقیم با کد سفارش NM فعال است.
+                پیگیری با شماره موبایل به دلیل ضرورت ارسال پیامک OTP، پس از اتصال رسمی وب‌سرویس پیامکی فعال خواهد شد. در حال حاضر پیگیری مستقیم با کد ۶ رقمی آسان یا کد سفارش فعال است.
               </span>
             </div>
           </div>
@@ -304,13 +311,14 @@ export const OrderTrackingModal: React.FC<OrderTrackingModalProps> = ({
                     onClick={(e) => {
                       e.preventDefault();
                       e.stopPropagation();
-                      setQuery(rec.id);
-                      handleSearch(rec.id);
+                      const targetCode = rec.shortCode || rec.id;
+                      setQuery(targetCode);
+                      handleSearch(targetCode);
                     }}
                     className="px-3 py-1.5 rounded-xl bg-white border border-[#D5C6AC] hover:border-[#163826] text-xs font-bold text-[#163826] flex items-center gap-1.5 cursor-pointer shadow-xs active:scale-95 transition-all"
                   >
                     <Truck className="w-3.5 h-3.5 text-emerald-600" />
-                    <span className="font-mono">{rec.id}</span>
+                    <span className="font-mono">{rec.shortCode || rec.id}</span>
                     <span className="text-[10px] text-gray-500">({rec.totalAmount.toLocaleString('fa-IR')} تومان)</span>
                   </button>
                 ))}
@@ -326,14 +334,41 @@ export const OrderTrackingModal: React.FC<OrderTrackingModalProps> = ({
             </div>
           ) : order ? (
             <div className="space-y-5 animate-in fade-in">
+              {/* Refund Notice if order is refunded */}
+              {(order.status === 'refunded' || order.refundStatus === 'refunded') && (
+                <div className="bg-rose-50 border-2 border-rose-300 p-4 rounded-3xl flex items-start gap-3.5 text-rose-950 shadow-sm animate-in fade-in">
+                  <div className="w-10 h-10 rounded-2xl bg-rose-200/80 flex items-center justify-center text-rose-700 shrink-0">
+                    <RotateCcw className="w-5 h-5" />
+                  </div>
+                  <div className="space-y-1.5 flex-1">
+                    <span className="font-black text-sm block text-rose-900">
+                      وضعیت: سفارش مرجوع گردید و بازگشت وجه انجام شد.
+                    </span>
+                    <p className="text-xs text-rose-800 leading-relaxed">
+                      این سفارش با هماهنگی واحد پشتیبانی مرجوع گردیده و مبلغ کل به شماره حساب/کارت شما عودت داده شد.
+                    </p>
+                    {order.refundNotes && (
+                      <div className="bg-white/90 p-2.5 rounded-xl border border-rose-200 text-xs text-gray-800 mt-2">
+                        <strong className="text-rose-900">توضیحات پشتیبانی:</strong> {order.refundNotes}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
               {/* Order Status Banner */}
               <div className="bg-white p-4 sm:p-5 rounded-3xl border border-[#E7DDC9] shadow-xs">
                 <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-[#F0E6D5]">
                   <div>
-                    <span className="text-xs text-[#718274] block">کد رهگیری سفارش:</span>
-                    <span className="text-lg font-mono font-black text-[#163826]">
-                      {order.id}
-                    </span>
+                    <span className="text-xs text-[#718274] block">کد پیگیری ۶ رقمی سفارش:</span>
+                    <div className="flex items-center gap-2">
+                      <span className="text-2xl font-mono font-black text-[#163826] bg-[#FAF5EC] px-3 py-1 rounded-xl border border-[#D4A340]">
+                        {order.shortCode || order.id}
+                      </span>
+                      {order.shortCode && (
+                        <span className="text-xs text-gray-500 font-mono">({order.id})</span>
+                      )}
+                    </div>
                   </div>
                   <div className="text-left">
                     <span className="text-xs text-[#718274] block">تاریخ ثبت سفارش:</span>
