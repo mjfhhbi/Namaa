@@ -25,7 +25,7 @@ interface CheckoutModalProps {
   onClose: () => void;
   items: CartItem[];
   settings: StoreSettings;
-  onOrderCompleted: (order: Order) => void;
+  onOrderCompleted: (order: Order) => Promise<Order | void> | void;
 }
 
 // Convert Persian and Arabic numbers to English standard digits
@@ -131,7 +131,12 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
   }, [isOpen, step, onClose]);
 
   const subtotal = items.reduce((sum, item) => sum + item.product.price * item.quantity, 0);
-  const shippingCost = settings.shippingCost || 0;
+  const isFreeShipping = Boolean(
+    settings.freeShippingThreshold &&
+    settings.freeShippingThreshold > 0 &&
+    subtotal >= settings.freeShippingThreshold
+  );
+  const shippingCost = isFreeShipping ? 0 : (settings.shippingCost || 0);
 
   let discountAmount = 0;
   if (appliedCoupon) {
@@ -342,8 +347,9 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
     };
 
     try {
-      setCreatedOrder(newOrder);
-      await onOrderCompleted(newOrder);
+      const serverResult = await onOrderCompleted(newOrder);
+      const authoritativeOrder = (serverResult as Order) || newOrder;
+      setCreatedOrder(authoritativeOrder);
 
       // Launch celebratory confetti
       confetti({
@@ -728,7 +734,9 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                 )}
                 <div className="flex justify-between">
                   <span>هزینه ارسال پستی:</span>
-                  <span>{shippingCost > 0 ? `${shippingCost.toLocaleString('fa-IR')} تومان` : 'طبق تعرفه پستی'}</span>
+                  <span className={`font-bold ${isFreeShipping ? 'text-emerald-700' : ''}`}>
+                    {isFreeShipping ? 'رایگان (هدیه ناما)' : (shippingCost > 0 ? `${shippingCost.toLocaleString('fa-IR')} تومان` : 'رایگان')}
+                  </span>
                 </div>
                 <div className="pt-2 border-t border-[#D5C6AC] flex items-center justify-between text-sm font-black text-[#163826]">
                   <span>مبلغ قابل پرداخت:</span>

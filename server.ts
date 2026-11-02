@@ -575,7 +575,43 @@ async function findOrderByTrackingCode(rawCode: string): Promise<any | null> {
     }
   }
 
-  // 3. Query Firestore for real-time status reflection
+  // 3. Query direct short_codes reservation mapping in Firestore (O(1) instant lookup)
+  if (!orderData && adminDb) {
+    try {
+      const codeDoc = await adminDb.collection('short_codes').doc(cleanCode).get();
+      if (codeDoc.exists) {
+        const mappedId = codeDoc.data()?.orderId;
+        if (mappedId) {
+          const ordDoc = await adminDb.collection('orders').doc(mappedId).get();
+          if (ordDoc.exists) {
+            orderData = ordDoc.data();
+            persistServerOrder(orderData);
+          }
+        }
+      }
+    } catch (_e) {}
+  }
+
+  // 4. Query Firestore client SDK for short_codes mapping if adminDb is not present
+  if (!orderData) {
+    try {
+      const codeRef = doc(db, 'short_codes', cleanCode);
+      const codeSnap = await getDoc(codeRef);
+      if (codeSnap.exists()) {
+        const mappedId = codeSnap.data()?.orderId;
+        if (mappedId) {
+          const ordRef = doc(db, 'orders', mappedId);
+          const ordSnap = await getDoc(ordRef);
+          if (ordSnap.exists()) {
+            orderData = ordSnap.data();
+            persistServerOrder(orderData);
+          }
+        }
+      }
+    } catch (_e) {}
+  }
+
+  // 5. Query Firestore direct document by Order ID
   if (!orderData) {
     try {
       const orderRef = doc(db, 'orders', cleanCode);
@@ -587,7 +623,7 @@ async function findOrderByTrackingCode(rawCode: string): Promise<any | null> {
     } catch (_e) {}
   }
 
-  // 4. Query Admin Firestore if available (by ID, shortCode, or postal code)
+  // 6. Query Admin Firestore if available (by ID, shortCode, or postal code)
   if (!orderData && adminDb) {
     try {
       const adminSnap = await adminDb.collection('orders').doc(cleanCode).get();
@@ -612,11 +648,19 @@ async function findOrderByTrackingCode(rawCode: string): Promise<any | null> {
     } catch (_e) {}
   }
 
-  // 5. Ensure real-time Firestore synchronization for already-cached order
+  // 7. Ensure real-time Firestore synchronization for already-cached order
   if (orderData && adminDb) {
     try {
       const freshSnap = await adminDb.collection('orders').doc(orderData.id).get();
       if (freshSnap.exists) {
+        orderData = freshSnap.data();
+        persistServerOrder(orderData);
+      }
+    } catch (_e) {}
+  } else if (orderData && !adminDb) {
+    try {
+      const freshSnap = await getDoc(doc(db, 'orders', orderData.id));
+      if (freshSnap.exists()) {
         orderData = freshSnap.data();
         persistServerOrder(orderData);
       }
@@ -747,8 +791,6 @@ app.post('/api/orders/track', async (req, res) => {
       success: true,
       order: sanitizeOrderForTracking(orderData)
     });
-
-    return res.status(400).json({ error: 'اطلاعات ارسالی نامعتبر است.' });
   } catch (err: any) {
     console.error('Track order error:', err);
     return res.status(500).json({ error: 'خطای سیستمی در پیگیری سفارش: ' + (err?.message || '') });
@@ -807,24 +849,14 @@ app.post('/api/orders/upload-receipt', async (req, res) => {
       return res.status(400).json({ error: 'شماره تلفن همراه معتبر ۱۱ رقمی ثبت شده در سفارش الزامی است.' });
     }
 
-    let orderData = serverOrdersCache.get(cleanId);
-    if (!orderData) {
-      try {
-        const orderRef = doc(db, 'orders', cleanId);
-        const orderSnap = await getDoc(orderRef);
-        if (orderSnap.exists()) {
-          orderData = orderSnap.data();
-        }
-      } catch (_e) {}
-    }
-
+    const orderData = await findOrderByTrackingCode(cleanId);
     if (!orderData) {
       rate.failedCount = (rate.failedCount || 0) + 1;
       if (rate.failedCount >= 5) {
         rate.lockedUntil = now + 15 * 60 * 1000;
       }
       receiptAttempts.set(clientIp, rate);
-      return res.status(404).json({ error: 'سفارش یافت نشد.' });
+      return res.status(404).json({ error: 'سفارش با این شناسه یا کد پیگیری یافت نشد.' });
     }
 
     const storedPhone = normalizeIranianPhone(orderData.customerPhone || '');
@@ -865,20 +897,21 @@ app.post('/api/orders/upload-receipt', async (req, res) => {
       updatedAt: orderData.updatedAt
     };
 
-    if (!adminDb) {
-      return res.status(503).json({
-        error: 'سرویس ثبت فیش در پایگاه داده به دلیل عدم پیکربندی کلید امنیتی سرور (Firebase Admin SDK) موقتاً غیرفعال است.'
-      });
+    if (adminDb) {
+      try {
+        await adminDb.collection('orders').doc(orderData.id).update(updatePayload);
+      } catch (fErr: any) {
+        console.warn('adminDb receipt update notice:', fErr.message);
+      }
     }
-
     try {
-      await adminDb.collection('orders').doc(cleanId).update(updatePayload);
-    } catch (fErr: any) {
-      console.error('Database receipt update error:', fErr);
-      return res.status(500).json({
-        error: 'خطا در ثبت رسید در پایگاه داده: ' + (fErr.message || 'لطفاً مجدداً تلاش نمایید.')
-      });
-    }
+      await updateDoc(doc(db, 'orders', orderData.id), updatePayload);
+    } catch (_clientErr) {}
+
+    // Send updated order notification to store owner's private ntfy topic
+    try {
+      await sendOrderNtfy(orderData, serverSettingsCache.private);
+    } catch (_ntfyErr) {}
 
     return res.status(200).json({
       success: true,
@@ -1240,6 +1273,9 @@ app.post('/api/admin/orders/update', requireAdminAuth, async (req, res) => {
         console.warn('adminDb order update notice:', dbErr.message);
       }
     }
+    try {
+      await updateDoc(doc(db, 'orders', orderId), updateData);
+    } catch (_clientErr) {}
     return res.status(200).json({ success: true });
   } catch (err: any) {
     return res.status(500).json({ error: 'خطا در بروزرسانی وضعیت سفارش: ' + err.message });
@@ -1253,14 +1289,24 @@ app.post('/api/admin/orders/delete', requireAdminAuth, async (req, res) => {
     if (!orderId) {
       return res.status(400).json({ error: 'شناسه سفارش الزامی است.' });
     }
+    const existingOrder = serverOrdersCache.get(orderId.toUpperCase());
     removeServerOrder(orderId);
     if (adminDb) {
       try {
         await adminDb.collection('orders').doc(orderId).delete();
+        if (existingOrder?.shortCode) {
+          await adminDb.collection('short_codes').doc(String(existingOrder.shortCode)).delete().catch(() => {});
+        }
       } catch (dbErr: any) {
         console.warn('adminDb order delete notice:', dbErr.message);
       }
     }
+    try {
+      await deleteDoc(doc(db, 'orders', orderId));
+      if (existingOrder?.shortCode) {
+        await deleteDoc(doc(db, 'short_codes', String(existingOrder.shortCode))).catch(() => {});
+      }
+    } catch (_clientErr) {}
     return res.status(200).json({ success: true });
   } catch (err: any) {
     console.error('Server delete order error:', err);

@@ -20,6 +20,7 @@ import {
   getMyPlacedOrders 
 } from '../services/storeService';
 import { compressImage } from '../utils/imageCompressor';
+import { toEnglishDigits } from '../utils/phone';
 
 interface OrderTrackingModalProps {
   isOpen: boolean;
@@ -92,7 +93,8 @@ export const OrderTrackingModal: React.FC<OrderTrackingModalProps> = ({
 
   // Search Handler: with 6-digit code, Order ID, or postal tracking code
   const handleSearch = async (overrideCode?: string) => {
-    const rawId = (overrideCode !== undefined ? overrideCode : query).trim();
+    const rawInput = (overrideCode !== undefined ? overrideCode : query).trim();
+    const rawId = toEnglishDigits(rawInput).trim();
 
     if (!rawId) {
       setSearchError('لطفاً کد ۶ رقمی سفارش (مثال: ۱۲۳۴۵۶) یا شماره مرسوله پستی را وارد فرمایید.');

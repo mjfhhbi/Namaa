@@ -43,8 +43,16 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
   if (!isOpen) return null;
 
   const subtotal = items.reduce((sum, item) => sum + item.product.price * item.quantity, 0);
-  const shippingCost = items.length === 0 ? 0 : settings.shippingCost;
+  const isFreeShipping = Boolean(
+    settings.freeShippingThreshold &&
+    settings.freeShippingThreshold > 0 &&
+    subtotal >= settings.freeShippingThreshold
+  );
+  const shippingCost = items.length === 0 ? 0 : (isFreeShipping ? 0 : (settings.shippingCost || 0));
   const total = subtotal + shippingCost;
+  const remainingForFreeShipping = settings.freeShippingThreshold && settings.freeShippingThreshold > subtotal
+    ? settings.freeShippingThreshold - subtotal
+    : 0;
 
   return (
     <div 
@@ -165,7 +173,21 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
 
         {/* Footer / Summary */}
         {items.length > 0 && (
-          <div className="p-4 sm:p-5 border-t border-[#E8DEC9] bg-white space-y-3 shadow-lg">
+          <div className="p-4 sm:p-5 border-t border-[#E8DEC9] space-y-4 bg-white">
+            {remainingForFreeShipping > 0 ? (
+              <div className="bg-[#FAF3E5] border border-[#E5D7BE] p-2.5 rounded-xl text-xs text-[#8A5A12] flex items-center gap-2">
+                <Truck className="w-4 h-4 text-[#D4A340] shrink-0" />
+                <span>
+                  تنها <strong>{remainingForFreeShipping.toLocaleString('fa-IR')} تومان</strong> تا ارسال رایگان پستی باقی مانده!
+                </span>
+              </div>
+            ) : isFreeShipping ? (
+              <div className="bg-emerald-50 border border-emerald-200 p-2.5 rounded-xl text-xs text-emerald-800 font-bold flex items-center gap-2">
+                <Sparkles className="w-4 h-4 text-emerald-600 shrink-0" />
+                <span>شامل ارسال رایگان پستی به سراسر ایران 🎉</span>
+              </div>
+            ) : null}
+
             <div className="space-y-1.5 text-xs text-[#4F6052]">
               <div className="flex justify-between">
                 <span>مجموع اقلام:</span>
@@ -173,8 +195,8 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
               </div>
               <div className="flex justify-between">
                 <span>هزینه بسته‌بندی و ارسال:</span>
-                <span className="font-bold">
-                  {shippingCost > 0 ? `${shippingCost.toLocaleString('fa-IR')} تومان` : 'طبق تعرفه پستی'}
+                <span className={`font-bold ${isFreeShipping ? 'text-emerald-700' : ''}`}>
+                  {isFreeShipping ? 'رایگان (هدیه ناما)' : (shippingCost > 0 ? `${shippingCost.toLocaleString('fa-IR')} تومان` : 'رایگان')}
                 </span>
               </div>
               <div className="flex justify-between pt-2 border-t border-[#EAE0D0] text-sm sm:text-base font-black text-[#163826]">

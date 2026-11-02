@@ -142,6 +142,11 @@ export function extractPublicSettings(s: StoreSettings): Record<string, any> {
     'heroBadge', 'heroTitle', 'heroSubtitle', 'heroButtonText',
     'promoBadge', 'promoTitle', 'promoSubtitle', 'aboutText',
     'qualityBadge1', 'qualityBadge2', 'qualityBadge3', 'qualityBadge4',
+    'refundPolicyTitle', 'refundPolicyText', 'adminLoginButtonText',
+    'checkoutTitle', 'checkoutSubtitle', 'checkoutSubmitButtonText',
+    'trackingModalTitle', 'trackingModalSubtitle', 'trackingInputPlaceholder',
+    'footerAboutTitle', 'footerAboutText', 'footerTrustTitle', 'footerTrustText', 'footerContactTitle',
+    'cartTitle', 'cartEmptyMessage',
     'customCategories', 'zarinpalEnabled', 'zarinpalSandbox'
   ];
   const res: Record<string, any> = {};
@@ -537,6 +542,7 @@ export function saveMyPlacedOrder(order: Order): void {
     // Sanitize customer PII: omit full street address, postal code, and payment card details from localStorage
     const safeOrder: Partial<Order> = {
       id: order.id,
+      shortCode: order.shortCode,
       customerName: order.customerName,
       customerPhone: order.customerPhone ? `${order.customerPhone.slice(0, 4)}***${order.customerPhone.slice(-4)}` : '',
       province: order.province,

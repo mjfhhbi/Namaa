@@ -201,6 +201,16 @@
         "zarinpalMerchantId": { "type": "string" }
       },
       "required": ["cardNumber", "cardHolder"]
+    },
+    "ShortCodeReservation": {
+      "title": "ShortCodeReservation",
+      "description": "Unique 6-digit order tracking reservation index document",
+      "type": "object",
+      "properties": {
+        "orderId": { "type": "string", "description": "Associated full system order ID" },
+        "createdAt": { "type": "string", "description": "Creation timestamp" }
+      },
+      "required": ["orderId", "createdAt"]
     }
   },
   "firestore": {
@@ -211,6 +221,10 @@
     "/orders/{orderId}": {
       "schema": "Order",
       "description": "Collection of customer orders with verification and shipment records"
+    },
+    "/short_codes/{code}": {
+      "schema": "ShortCodeReservation",
+      "description": "Unique 6-digit numeric tracking codes reserved for instant customer order lookup"
     },
     "/settings/public": {
       "schema": "PublicSettings",

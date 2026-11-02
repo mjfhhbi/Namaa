@@ -347,10 +347,12 @@ export default function App() {
   };
 
   // Checkout completed
-  const handleOrderCompleted = async (newOrder: Order) => {
-    await createOrder(newOrder, settings);
-    setOrders(prev => [newOrder, ...prev]);
+  const handleOrderCompleted = async (newOrder: Order): Promise<Order> => {
+    const serverOrder = await createOrder(newOrder, settings);
+    const finalOrder = serverOrder || newOrder;
+    setOrders(prev => [finalOrder, ...prev.filter(o => o.id !== finalOrder.id && (!finalOrder.shortCode || o.shortCode !== finalOrder.shortCode))]);
     setCart([]); // Clear cart
+    return finalOrder;
   };
 
   // Admin order status update

@@ -99,7 +99,19 @@ export const Header: React.FC<HeaderProps> = ({
             <span className="hidden md:inline whitespace-nowrap">پیگیری سفارش</span>
           </button>
 
-
+          {/* 3. Admin Panel Quick Access (Visible only when authenticated) */}
+          {isAdminLoggedIn && onOpenAdmin && (
+            <button
+              type="button"
+              onClick={onOpenAdmin}
+              className="shrink-0 inline-flex items-center justify-center gap-1.5 h-9 sm:h-10 px-2.5 sm:px-3 text-xs font-bold text-amber-900 bg-amber-100 hover:bg-amber-200 rounded-full border border-amber-300 transition-colors cursor-pointer active:scale-95 shadow-xs"
+              title="پنل مدیریت فروشگاه"
+              aria-label="پنل مدیریت"
+            >
+              <KeyRound className="w-3.5 h-3.5 text-amber-700 shrink-0" />
+              <span className="hidden lg:inline whitespace-nowrap">پنل مدیریت</span>
+            </button>
+          )}
 
           {/* 4. Shopping Cart Button */}
           <button
