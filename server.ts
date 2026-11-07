@@ -33,7 +33,7 @@ const app = express();
 // Enable secure reverse proxy support (Cloud Run / Nginx / Docker)
 app.set('trust proxy', 1);
 
-const PORT = 3000;
+const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 const HOST = '0.0.0.0';
 
 // Initialize Firebase for server-side trusted validations
@@ -115,9 +115,12 @@ try {
 // Middleware
 app.use(express.json({ limit: '10mb' }));
 
-// Health check endpoint for Cloud Run / production health probes
+// Health check endpoints for Cloud Run, Cloudflare, and monitoring probes
 app.get('/healthz', (_req, res) => {
   res.status(200).send('OK');
+});
+app.get('/api/health', (_req, res) => {
+  res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
 // Helper: Normalize Persian/Arabic digits to English standard
@@ -437,6 +440,22 @@ app.post('/api/admin/change-pin', requireAdminAuth, async (req, res) => {
     success: true,
     message: 'رمز عبور مدیریت با موفقیت در فضای ذخیره‌سازی امن سرور تغییر یافت و پایدار شد.',
     token: result.token
+  });
+});
+
+// Admin session status check
+app.get('/api/admin/auth/status', (req, res) => {
+  const customHeader = req.headers['x-admin-token'] as string;
+  const authHeader = req.headers.authorization;
+  let token = customHeader;
+  if (!token && authHeader && authHeader.startsWith('Bearer ')) {
+    token = authHeader.slice(7).trim();
+  }
+  const isAuthenticated = Boolean(token && validateSessionToken(token));
+  return res.status(200).json({
+    success: true,
+    pinConfigured: isPinConfigured(),
+    isAuthenticated
   });
 });
 
@@ -963,6 +982,12 @@ app.post('/api/checkout/payment-info', async (req, res) => {
  * Strictly strips banking info, secret credentials, ntfy topics, and admin PINs
  */
 app.get('/api/settings/public', (_req, res) => {
+  return res.status(200).json({
+    success: true,
+    settings: serverSettingsCache.public
+  });
+});
+app.get('/api/settings', (_req, res) => {
   return res.status(200).json({
     success: true,
     settings: serverSettingsCache.public

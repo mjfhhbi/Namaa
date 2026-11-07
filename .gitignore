@@ -63,3 +63,6 @@ temp/
 Thumbs.db
 *.swp
 *.swo
+
+# Cloudflare Wrangler cache
+.wrangler/

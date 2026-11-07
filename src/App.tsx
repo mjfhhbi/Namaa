@@ -29,16 +29,19 @@ import { Header } from './components/Header';
 import { Hero } from './components/Hero';
 import { CategoryShowcase } from './components/CategoryShowcase';
 import { ProductCard } from './components/ProductCard';
-import { ProductDetailModal } from './components/ProductDetailModal';
 import { CartDrawer } from './components/CartDrawer';
-import { CheckoutModal } from './components/CheckoutModal';
-import { OrderTrackingModal } from './components/OrderTrackingModal';
-import { AdminModal } from './components/AdminModal';
-import { AdminLoginDialog } from './components/AdminLoginDialog';
 import { Footer } from './components/Footer';
 import { WhatsAppButton } from './components/WhatsAppButton';
 import { IntroSplash } from './components/IntroSplash';
+import { OfflineIndicator } from './components/OfflineIndicator';
 import { DEFAULT_STORE_SETTINGS, AUTHENTIC_DEFAULT_PRODUCTS } from './types';
+
+// Code-splitting via React.lazy: Heavy modals and admin suite are deferred until opened
+const ProductDetailModal = React.lazy(() => import('./components/ProductDetailModal').then(m => ({ default: m.ProductDetailModal })));
+const CheckoutModal = React.lazy(() => import('./components/CheckoutModal').then(m => ({ default: m.CheckoutModal })));
+const OrderTrackingModal = React.lazy(() => import('./components/OrderTrackingModal').then(m => ({ default: m.OrderTrackingModal })));
+const AdminModal = React.lazy(() => import('./components/AdminModal').then(m => ({ default: m.AdminModal })));
+const AdminLoginDialog = React.lazy(() => import('./components/AdminLoginDialog').then(m => ({ default: m.AdminLoginDialog })));
 import { 
   SlidersHorizontal, 
   Sparkles, 
@@ -516,13 +519,20 @@ export default function App() {
               <span>{toastMessage}</span>
             </div>
           )}
-          <AdminLoginDialog
-            isOpen={true}
-            mode="page"
-            onClose={() => navigateTo('/')}
-            onReturnToStore={() => navigateTo('/')}
-            onSuccess={handleAdminLoginSuccess}
-          />
+          <React.Suspense fallback={
+            <div className="flex flex-col items-center justify-center p-8 text-xs font-bold text-[#163826]">
+              <div className="w-8 h-8 border-3 border-[#163826] border-t-transparent rounded-full animate-spin mb-3" />
+              <span>در حال بارگذاری فرم ورود مدیریت...</span>
+            </div>
+          }>
+            <AdminLoginDialog
+              isOpen={true}
+              mode="page"
+              onClose={() => navigateTo('/')}
+              onReturnToStore={() => navigateTo('/')}
+              onSuccess={handleAdminLoginSuccess}
+            />
+          </React.Suspense>
         </div>
       );
     }
@@ -535,28 +545,35 @@ export default function App() {
             <span>{toastMessage}</span>
           </div>
         )}
-        <AdminModal
-          isOpen={true}
-          onClose={() => navigateTo('/')}
-          orders={orders}
-          products={products}
-          settings={settings}
-          onUpdateOrderStatus={handleUpdateOrderStatus}
-          onDeleteOrder={handleDeleteOrder}
-          onClearAllOrders={handleClearAllOrders}
-          onSaveProduct={handleSaveProduct}
-          onDeleteProduct={handleDeleteProduct}
-          onClearAllProducts={handleClearAllProducts}
-          onResetSampleProducts={handleResetSampleProducts}
-          onUpdateSettings={handleUpdateSettings}
-          onAuthChange={(isAuth, email) => {
-            setIsAdminLoggedIn(isAuth);
-            setAdminUserEmail(email || null);
-            if (!isAuth) {
-              navigateTo('/');
-            }
-          }}
-        />
+        <React.Suspense fallback={
+          <div className="flex flex-col items-center justify-center min-h-[400px] text-xs font-bold text-[#163826]">
+            <div className="w-8 h-8 border-3 border-[#163826] border-t-transparent rounded-full animate-spin mb-3" />
+            <span>در حال بارگذاری پنل مدیریت...</span>
+          </div>
+        }>
+          <AdminModal
+            isOpen={true}
+            onClose={() => navigateTo('/')}
+            orders={orders}
+            products={products}
+            settings={settings}
+            onUpdateOrderStatus={handleUpdateOrderStatus}
+            onDeleteOrder={handleDeleteOrder}
+            onClearAllOrders={handleClearAllOrders}
+            onSaveProduct={handleSaveProduct}
+            onDeleteProduct={handleDeleteProduct}
+            onClearAllProducts={handleClearAllProducts}
+            onResetSampleProducts={handleResetSampleProducts}
+            onUpdateSettings={handleUpdateSettings}
+            onAuthChange={(isAuth, email) => {
+              setIsAdminLoggedIn(isAuth);
+              setAdminUserEmail(email || null);
+              if (!isAuth) {
+                navigateTo('/');
+              }
+            }}
+          />
+        </React.Suspense>
       </div>
     );
   }
@@ -728,13 +745,10 @@ export default function App() {
       {/* Floating WhatsApp Quick Support Button */}
       <WhatsAppButton phone={settings.supportPhone || '+98 916 644 9409'} />
 
-      {/* MODALS (Customer Only) */}
-      <ProductDetailModal
-        product={selectedProduct}
-        onClose={() => setSelectedProduct(null)}
-        onAddToCart={handleAddToCart}
-      />
+      {/* Offline Connectivity Notification */}
+      <OfflineIndicator />
 
+      {/* Cart Drawer (Always light and ready for checkout) */}
       <CartDrawer
         isOpen={isCartOpen}
         onClose={() => setIsCartOpen(false)}
@@ -745,22 +759,37 @@ export default function App() {
         settings={settings}
       />
 
-      <CheckoutModal
-        isOpen={isCheckoutOpen}
-        onClose={() => setIsCheckoutOpen(false)}
-        items={cart}
-        settings={settings}
-        onOrderCompleted={handleOrderCompleted}
-      />
+      {/* MODALS (Customer Only - Lazy loaded only upon user click) */}
+      <React.Suspense fallback={null}>
+        {selectedProduct && (
+          <ProductDetailModal
+            product={selectedProduct}
+            onClose={() => setSelectedProduct(null)}
+            onAddToCart={handleAddToCart}
+          />
+        )}
 
-      <OrderTrackingModal
-        isOpen={isTrackingOpen}
-        onClose={() => setIsTrackingOpen(false)}
-        settings={settings}
-        onOrderUpdated={(upd) => {
-          setOrders(prev => prev.map(o => o.id === upd.id ? upd : o));
-        }}
-      />
+        {isCheckoutOpen && (
+          <CheckoutModal
+            isOpen={isCheckoutOpen}
+            onClose={() => setIsCheckoutOpen(false)}
+            items={cart}
+            settings={settings}
+            onOrderCompleted={handleOrderCompleted}
+          />
+        )}
+
+        {isTrackingOpen && (
+          <OrderTrackingModal
+            isOpen={isTrackingOpen}
+            onClose={() => setIsTrackingOpen(false)}
+            settings={settings}
+            onOrderUpdated={(upd) => {
+              setOrders(prev => prev.map(o => o.id === upd.id ? upd : o));
+            }}
+          />
+        )}
+      </React.Suspense>
     </div>
   );
 }
