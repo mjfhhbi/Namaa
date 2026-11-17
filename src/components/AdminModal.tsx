@@ -103,6 +103,21 @@ export const AdminModal: React.FC<AdminModalProps> = ({
   }, [onAuthChange]);
 
   React.useEffect(() => {
+    if (!isOpen || !isAuthenticated) return;
+    let cancelled = false;
+    fetchAdminSettings()
+      .then((fullSettings) => {
+        if (!cancelled && fullSettings) {
+          setFormSettings(fullSettings);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen, isAuthenticated]);
+
+  React.useEffect(() => {
     if (!isOpen) return;
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
@@ -150,7 +165,6 @@ export const AdminModal: React.FC<AdminModalProps> = ({
           const fullSettings = await fetchAdminSettings();
           if (fullSettings) {
             setFormSettings(fullSettings);
-            onUpdateSettings(fullSettings);
           }
         } catch {}
       } else {
@@ -213,6 +227,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
   const [resendingNtfyOrderId, setResendingNtfyOrderId] = useState<string | null>(null);
   const [resendNtfyFeedback, setResendNtfyFeedback] = useState<{ id: string; message: string; isError?: boolean } | null>(null);
   const [saveSuccessMessage, setSaveSuccessMessage] = useState(false);
+  const [backupError, setBackupError] = useState<string | null>(null);
 
   // Password change state
   const [oldPasswordInput, setOldPasswordInput] = useState('');
@@ -608,6 +623,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
   const handleImportBackup = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    setBackupError(null);
     const reader = new FileReader();
     reader.onload = (event) => {
       try {
@@ -621,8 +637,8 @@ export const AdminModal: React.FC<AdminModalProps> = ({
         }
         setSaveSuccessMessage(true);
         setTimeout(() => setSaveSuccessMessage(false), 3000);
-      } catch (err) {
-        alert('فایل پشتیبان نامعتبر است.');
+      } catch {
+        setBackupError('فایل پشتیبان نامعتبر است. لطفاً یک فایل JSON معتبر پشتیبان فروشگاه انتخاب کنید.');
       }
     };
     reader.readAsText(file);
@@ -3886,16 +3902,24 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                           </button>
                         </div>
 
-                        <div className="bg-white p-5 rounded-3xl border border-[#E7DDC9] flex items-center justify-between">
-                          <div>
-                            <h4 className="font-black text-sm text-[#231709]">بازیابی از فایل پشتیبان (Restore)</h4>
-                            <p className="text-xs text-gray-500 mt-0.5">بارگذاری فایل JSON جهت بازگردانی اطلاعات فروشگاه</p>
+                        <div className="bg-white p-5 rounded-3xl border border-[#E7DDC9] space-y-3">
+                          <div className="flex items-center justify-between">
+                            <div>
+                              <h4 className="font-black text-sm text-[#231709]">بازیابی از فایل پشتیبان (Restore)</h4>
+                              <p className="text-xs text-gray-500 mt-0.5">بارگذاری فایل JSON جهت بازگردانی اطلاعات فروشگاه</p>
+                            </div>
+                            <label className="px-4 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-800 text-xs font-bold rounded-xl flex items-center gap-1.5 transition-all cursor-pointer border">
+                              <Upload className="w-3.5 h-3.5" />
+                              <span>انتخاب فایل و بازیابی</span>
+                              <input type="file" accept=".json" onChange={handleImportBackup} className="hidden" />
+                            </label>
                           </div>
-                          <label className="px-4 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-800 text-xs font-bold rounded-xl flex items-center gap-1.5 transition-all cursor-pointer border">
-                            <Upload className="w-3.5 h-3.5" />
-                            <span>انتخاب فایل و بازیابی</span>
-                            <input type="file" accept=".json" onChange={handleImportBackup} className="hidden" />
-                          </label>
+                          {backupError && (
+                            <div className="p-2.5 bg-red-50 border border-red-200 text-red-700 text-xs font-bold rounded-xl flex items-center gap-2">
+                              <AlertCircle className="w-4 h-4 shrink-0" />
+                              <span>{backupError}</span>
+                            </div>
+                          )}
                         </div>
 
                         <div className="bg-white p-5 rounded-3xl border border-red-200 flex items-center justify-between">

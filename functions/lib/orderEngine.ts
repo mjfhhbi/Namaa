@@ -16,6 +16,7 @@ export interface ValidatedOrderItem {
 
 export interface ValidatedOrder {
   id: string;
+  shortCode: string;
   customerName: string;
   customerPhone: string;
   province: string;
@@ -74,6 +75,13 @@ export function generateCollisionFreeOrderId(): string {
   crypto.getRandomValues(randomBytes);
   const randomPart = Array.from(randomBytes).map(b => b.toString(16).padStart(2, '0')).join('').toUpperCase().slice(0, 6);
   return `NM-${timestampPart}-${randomPart}`;
+}
+
+export function generate6DigitTrackingCode(): string {
+  const buf = new Uint32Array(1);
+  crypto.getRandomValues(buf);
+  const num = 100000 + (buf[0] % 900000);
+  return String(num);
 }
 
 export function generateCheckoutIntentId(): string {
@@ -261,6 +269,14 @@ export async function processAtomicOrder(
         }
       }
 
+      // Step A2: Reserve a unique 6-digit shortCode inside transaction
+      let assignedShortCode = generate6DigitTrackingCode();
+      for (let attemptCode = 0; attemptCode < 10; attemptCode++) {
+        const codeSnap = await firestore.getDocument(`short_codes/${assignedShortCode}`, txId);
+        if (!codeSnap.exists) break;
+        assignedShortCode = generate6DigitTrackingCode();
+      }
+
       // Step B: READ ALL PRODUCTS inside transaction
       let computedSubtotal = 0;
       const verifiedItems: ValidatedOrderItem[] = [];
@@ -333,6 +349,7 @@ export async function processAtomicOrder(
 
       const newOrder: ValidatedOrder = {
         id: orderId,
+        shortCode: assignedShortCode,
         customerName: clean.customerName,
         customerPhone: clean.cleanPhone,
         province: clean.province,
@@ -393,7 +410,19 @@ export async function processAtomicOrder(
         currentDocument: { exists: false }
       });
 
-      // 3. Insert Idempotency record with exists: false precondition
+      // 3. Reserve 6-digit shortCode mapping with exists: false precondition
+      writes.push({
+        update: {
+          name: `${databasePath}/documents/short_codes/${assignedShortCode}`,
+          fields: {
+            orderId: toFirestoreValue(orderId),
+            createdAt: toFirestoreValue(nowIso)
+          }
+        },
+        currentDocument: { exists: false }
+      });
+
+      // 4. Insert Idempotency record with exists: false precondition
       writes.push({
         update: {
           name: `${databasePath}/documents/orders_idempotency/${effectiveIdempotencyKey}`,

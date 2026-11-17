@@ -23,6 +23,12 @@ import { onRequestPost as resetProductsPost } from '../functions/api/admin/produ
 import { onRequestPost as syncProductsPost } from '../functions/api/admin/products/sync';
 import { onRequestPost as updateSettingsPost } from '../functions/api/admin/settings/update';
 import { onRequestGet as getSettingsAdminGet } from '../functions/api/admin/settings';
+import { onRequestGet as getOrdersAdminGet } from '../functions/api/admin/orders';
+import { onRequestPost as updateOrderPost } from '../functions/api/admin/orders/update';
+import { onRequestPost as deleteOrderPost } from '../functions/api/admin/orders/delete';
+import { onRequestPost as clearOrdersPost } from '../functions/api/admin/orders/clear';
+import { onRequestPost as testNtfyPost } from '../functions/api/admin/notifications/test-ntfy';
+import { onRequestPost as logoutAdminPost } from '../functions/api/admin/logout';
 import { signAdminJwt } from '../functions/lib/edgeSecurity';
 import { Env, EventContext } from '../functions/types';
 
@@ -127,6 +133,47 @@ export async function runAdminEndpointAuthTests() {
       method: 'GET',
       url: 'https://example.com/api/admin/settings',
       handler: getSettingsAdminGet
+    },
+    {
+      name: 'GET /api/admin/orders',
+      method: 'GET',
+      url: 'https://example.com/api/admin/orders',
+      handler: getOrdersAdminGet
+    },
+    {
+      name: 'POST /api/admin/orders/update',
+      method: 'POST',
+      url: 'https://example.com/api/admin/orders/update',
+      body: { orderId: 'NM-1000', status: 'approved' },
+      handler: updateOrderPost
+    },
+    {
+      name: 'POST /api/admin/orders/delete',
+      method: 'POST',
+      url: 'https://example.com/api/admin/orders/delete',
+      body: { orderId: 'NM-1000' },
+      handler: deleteOrderPost
+    },
+    {
+      name: 'POST /api/admin/orders/clear',
+      method: 'POST',
+      url: 'https://example.com/api/admin/orders/clear',
+      body: {},
+      handler: clearOrdersPost
+    },
+    {
+      name: 'POST /api/admin/notifications/test-ntfy',
+      method: 'POST',
+      url: 'https://example.com/api/admin/notifications/test-ntfy',
+      body: {},
+      handler: testNtfyPost
+    },
+    {
+      name: 'POST /api/admin/logout',
+      method: 'POST',
+      url: 'https://example.com/api/admin/logout',
+      body: {},
+      handler: logoutAdminPost
     }
   ];
 

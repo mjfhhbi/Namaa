@@ -11,6 +11,7 @@ import {
   fetchProducts, 
   fetchOrders, 
   fetchStoreSettings, 
+  fetchAdminSettings,
   createOrder, 
   updateOrderStatus, 
   deleteOrder,
@@ -24,7 +25,7 @@ import {
   subscribeToOrders,
   subscribeToSettings
 } from './services/storeService';
-import { testFirestoreConnection, auth, onAuthStateChanged, signOut } from './firebase';
+import { testFirestoreConnection } from './firebase';
 import { Header } from './components/Header';
 import { Hero } from './components/Hero';
 import { CategoryShowcase } from './components/CategoryShowcase';
@@ -138,11 +139,31 @@ export default function App() {
     return () => window.removeEventListener('storage', checkToken);
   }, []);
 
-  const handleAdminLoginSuccess = (_token: string) => {
+  const handleAdminLoginSuccess = async (_token: string) => {
     setIsAdminLoggedIn(true);
     setAdminUserEmail('مدیر سیستم');
     showToast('ورود به پنل مدیریت با موفقیت انجام شد.');
+    try {
+      const [fullSettings, latestOrders] = await Promise.all([
+        fetchAdminSettings(),
+        fetchOrders()
+      ]);
+      if (fullSettings) setSettings(fullSettings);
+      if (Array.isArray(latestOrders)) {
+        latestOrders.forEach(o => knownOrderIdsRef.current.add(o.id));
+        setOrders(latestOrders);
+      }
+    } catch {}
   };
+
+  useEffect(() => {
+    if (!isAdminLoggedIn) return;
+    fetchAdminSettings()
+      .then((fullSettings) => {
+        if (fullSettings) setSettings(fullSettings);
+      })
+      .catch(() => {});
+  }, [isAdminLoggedIn]);
 
   // Tracking Modal State
   const [isTrackingOpen, setIsTrackingOpen] = useState(false);

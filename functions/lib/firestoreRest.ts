@@ -96,8 +96,9 @@ export async function createGoogleServiceAccountJwt(
   const b64Payload = btoa(JSON.stringify(payload)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
   const dataToSign = `${b64Header}.${b64Payload}`;
 
-  // Strip PEM headers and newlines
-  const pemContents = privateKeyPem
+  // Normalize escaped newlines (common in Cloudflare/env secrets) and strip PEM headers
+  const normalizedPem = privateKeyPem.replace(/\\n/g, '\n');
+  const pemContents = normalizedPem
     .replace(/-----BEGIN PRIVATE KEY-----/g, '')
     .replace(/-----END PRIVATE KEY-----/g, '')
     .replace(/[\r\n\s]/g, '');

@@ -1,4 +1,5 @@
 import { PagesFunction, Env } from '../../types';
+import { fromFirestoreFields } from '../../lib/firestoreRest';
 
 const SECURITY_HEADERS = {
   'Content-Type': 'application/json; charset=utf-8',
@@ -22,7 +23,15 @@ const ALLOWED_PUBLIC_KEYS = new Set([
   'supportAddress',
   'announcement',
   'isStoreOpen',
-  'aboutText',
+  'storeClosedMessage',
+  'shippingNote',
+  'introEnabled',
+  'introBadge',
+  'introTitle',
+  'introSlogan',
+  'introSubtitle',
+  'introButtonText',
+  'footerCopyright',
   'heroBadge',
   'heroTitle',
   'heroSubtitle',
@@ -30,11 +39,30 @@ const ALLOWED_PUBLIC_KEYS = new Set([
   'promoBadge',
   'promoTitle',
   'promoSubtitle',
+  'aboutText',
   'qualityBadge1',
   'qualityBadge2',
   'qualityBadge3',
   'qualityBadge4',
-  'customCategories'
+  'refundPolicyTitle',
+  'refundPolicyText',
+  'adminLoginButtonText',
+  'checkoutTitle',
+  'checkoutSubtitle',
+  'checkoutSubmitButtonText',
+  'trackingModalTitle',
+  'trackingModalSubtitle',
+  'trackingInputPlaceholder',
+  'footerAboutTitle',
+  'footerAboutText',
+  'footerTrustTitle',
+  'footerTrustText',
+  'footerContactTitle',
+  'cartTitle',
+  'cartEmptyMessage',
+  'customCategories',
+  'zarinpalEnabled',
+  'zarinpalSandbox'
 ]);
 
 // Explicit forbidden blacklist for defense-in-depth
@@ -58,42 +86,60 @@ const FORBIDDEN_SENSITIVE_KEYS = new Set([
 ]);
 
 const DEFAULT_PUBLIC_SETTINGS: Record<string, any> = {
-  storeName: 'ناما | NAMA',
-  slogan: 'از نام و جان برای طعمی ماندگار',
-  shippingCost: 0,
+  storeName: 'محصولات غذایی ناما',
+  slogan: 'از نام و جان، برای طعمی ماندگار',
+  shippingCost: 45000,
   freeShippingThreshold: 600000,
-  supportPhone: '09166449409',
-  supportWhatsApp: '09166449409',
+  supportPhone: '+98 916 644 9409',
+  supportWhatsApp: '+98 916 644 9409',
   supportInstagram: 'namafoods_',
   supportAddress: '',
-  announcement: '🌿 از نام و جان برای طعمی ماندگار | ضمانت اصالت ۱۰۰٪ طبیعی تمام محصولات ناما + ارسال رایگان خریدهای بالای ۶۰۰ هزار تومان',
+  announcement: '',
   isStoreOpen: true,
+  storeClosedMessage: 'فروشگاه ناما در حال حاضر مشغول بروزرسانی موجودی انبار می‌باشد.',
+  shippingNote: 'ارسال با بسته‌بندی ایمن و ضربه‌گیر به سراسر ایران از طریق شرکت ملی پست جمهوری اسلامی ایران (پست پیشتاز).',
+  introEnabled: true,
+  introBadge: 'محصولات غذایی اصیل و طبیعی',
+  introTitle: 'فروشگاه مواد غذایی ناما',
+  introSlogan: '«از نام و جان، برای طعمی ماندگار»',
+  introSubtitle: 'دستچین اصیل‌ترین محصولات طبیعی ایران',
+  introButtonText: 'ورود به فروشگاه',
   heroBadge: 'محصولات غذایی ۱۰۰٪ طبیعی، سالم و دستچین ایرانی',
   heroTitle: 'از نام و جان، برای طعمی ماندگار',
-  heroSubtitle: 'سفره‌ای پربرکت با اصیل‌ترین طعم‌های دیار ایران؛ دستچین شده بدون مواد افزودنی و با تضمین بازگشت وجه.',
-  heroButtonText: 'مشاهده و خرید محصولات',
+  heroSubtitle: 'سفره‌ای پربرکت با اصیل‌ترین خوراکی‌های سنتی، سالم و سلامت‌محور ایران؛ دستچین‌شده با تعهد به خلوص، کیفیت ممتاز و طعمی ماندگار.',
   promoBadge: 'جشنواره اصالت و سلامت ناما',
   promoTitle: 'از نام و جان، برای طعمی ماندگار',
-  promoSubtitle: 'تجلی تعهد به سلامتی و اصالت؛ دستچین شده از دستان کشاورزان و زنبورداران امین ایران.',
-  aboutText: 'فروشگاه تخصصی مواد غذایی ارگانیک و سنتی ناما، برترین محصولات سالم مزارع، کوهپایه‌ها و نخلستان‌های ایران را مستقیماً به سفره‌های گرم خانواده‌ها می‌رساند.',
+  promoSubtitle: 'تعهد به سلامت و اصالت در «ناما»؛ دستچین شده بدون ذره‌ای شکر مصنوعی یا سموم شیمیایی، مستقیم از دستان کشاورزان و تولیدکنندگان امین ایران.',
+  aboutText: 'فروشگاه تخصصی محصولات طبیعی و سالم ناما با پایبندی به شعار «از نام و جان برای طعمی ماندگار»، باکیفیت‌ترین خوراکی‌های اصیل و سنتی ایران را مستقیماً به سفره‌های پربرکت خانواده‌ها می‌رساند.',
   qualityBadge1: 'برگه آزمایش معتبر',
   qualityBadge2: 'تضمین ۱۰۰٪ اصالت',
   qualityBadge3: 'بسته‌بندی ایمن پستی',
   qualityBadge4: 'ارسال فوری سراسری',
-  customCategories: [
-    {
-      id: 'cat_saffron',
-      name: 'زعفران و هل',
-      icon: '✨',
-      description: 'زعفران سرگل و نگین قائنات و هل اعلا'
-    }
-  ]
+  footerCopyright: 'تمامی حقوق متعلق به فروشگاه محصولات غذایی ناما (NAMA FOOD PRODUCTS) می‌باشد.',
+  refundPolicyTitle: 'شرایط ضمانت و بازگشت وجه',
+  refundPolicyText: 'ضمانت ۷ روزه بازگشت بی‌قیدوشرط وجه در صورت هرگونه عدم رضایت از کیفیت، عطر، طعم یا سلامت بسته‌بندی محصولات ناما.',
+  adminLoginButtonText: 'ورود با رمز',
+  checkoutTitle: 'اطلاعات ارسال و تحویل‌گیرنده',
+  checkoutSubtitle: 'لطفاً مشخصات دقیق پستی را جهت ارسال سریع مرسوله با پست پیشتاز وارد نمایید.',
+  checkoutSubmitButtonText: 'تکمیل و ثبت نهایی سفارش',
+  trackingModalTitle: 'پیگیری وضعیت سفارش',
+  trackingModalSubtitle: 'استعلام لحظه‌ای وضعیت سفارش با کد پیگیری ۶ رقمی یا کد مرسوله پستی',
+  trackingInputPlaceholder: 'کد پیگیری ۶ رقمی سفارش (مثال: ۱۲۳۴۵۶)',
+  footerAboutTitle: 'درباره محصولات غذایی ناما',
+  footerAboutText: 'فروشگاه تخصصی محصولات طبیعی و سالم ناما با تعهد به خلوص و اصالت، مرغوب‌ترین خوراکی‌های سنتی ایران را مستقیم عرضه می‌کند.',
+  footerTrustTitle: 'ضمانت اصالت و سلامت',
+  footerTrustText: 'تمامی محصولات ناما با برگه آزمایش، تضمین ۱۰۰٪ اصالت و بسته‌بندی بهداشتی ایمن ارسال می‌گردند.',
+  footerContactTitle: 'ارتباط و پشتیبانی',
+  cartTitle: 'سبد خرید شما',
+  cartEmptyMessage: 'سبد خرید شما در حال حاضر خالی است.',
+  customCategories: [],
+  zarinpalEnabled: false,
+  zarinpalSandbox: true
 };
 
 export function sanitizePublicSettings(raw: Record<string, any>): Record<string, any> {
   const safe: Record<string, any> = {};
   for (const [key, value] of Object.entries(raw)) {
-    // Defense-in-depth: Must be in allowlist AND must NOT be in forbidden blacklist
     if (ALLOWED_PUBLIC_KEYS.has(key) && !FORBIDDEN_SENSITIVE_KEYS.has(key) && value !== undefined) {
       safe[key] = value;
     }
@@ -121,7 +167,6 @@ export const onRequestOptions: PagesFunction<Env> = async () => {
 export const onRequestGet: PagesFunction<Env> = async (context) => {
   let publicSettings = { ...DEFAULT_PUBLIC_SETTINGS };
 
-  // Attempt to read from Firestore REST API if environment is bound
   const projectId = context.env.FIREBASE_PROJECT_ID;
   const databaseId = context.env.FIRESTORE_DATABASE_ID || '(default)';
 
@@ -134,13 +179,7 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
       if (res.ok) {
         const docData = await res.json() as any;
         if (docData && docData.fields) {
-          const parsed: Record<string, any> = {};
-          for (const [key, fieldObj] of Object.entries<any>(docData.fields)) {
-            if (fieldObj.stringValue !== undefined) parsed[key] = fieldObj.stringValue;
-            else if (fieldObj.integerValue !== undefined) parsed[key] = Number(fieldObj.integerValue);
-            else if (fieldObj.doubleValue !== undefined) parsed[key] = Number(fieldObj.doubleValue);
-            else if (fieldObj.booleanValue !== undefined) parsed[key] = fieldObj.booleanValue;
-          }
+          const parsed = fromFirestoreFields(docData.fields);
           publicSettings = { ...publicSettings, ...parsed };
         }
       }
