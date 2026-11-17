@@ -252,18 +252,25 @@ export class FirestoreRestClient implements FirestoreClientInterface {
   }
 
   async commit(transactionId: string, writes: any[]): Promise<boolean> {
+    return this.commitBatch(writes, transactionId);
+  }
+
+  async commitBatch(writes: any[], transactionId?: string): Promise<boolean> {
+    if (!writes.length) return true;
     const token = await this.getAuthToken();
     const url = `https://firestore.googleapis.com/v1/${this.databasePath}/documents:commit`;
+    const payload: Record<string, any> = { writes };
+    if (transactionId) {
+      payload.transaction = transactionId;
+    }
+
     const res = await fetch(url, {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${token}`,
         'Content-Type': 'application/json'
       },
-      body: JSON.stringify({
-        transaction: transactionId,
-        writes
-      })
+      body: JSON.stringify(payload)
     });
 
     if (res.status === 409) {
@@ -277,6 +284,99 @@ export class FirestoreRestClient implements FirestoreClientInterface {
     }
 
     return true;
+  }
+
+  async setDocument(path: string, data: Record<string, any>, merge: boolean = false): Promise<void> {
+    const token = await this.getAuthToken();
+    const cleanPath = path.startsWith('/') ? path.slice(1) : path;
+    const fields: Record<string, any> = {};
+    for (const [k, v] of Object.entries(data)) {
+      if (v !== undefined) {
+        fields[k] = toFirestoreValue(v);
+      }
+    }
+
+    let url = `https://firestore.googleapis.com/v1/${this.databasePath}/documents/${cleanPath}`;
+    if (merge) {
+      const fieldKeys = Object.keys(fields);
+      if (fieldKeys.length === 0) return;
+      const maskParams = fieldKeys
+        .map((k) => `updateMask.fieldPaths=${encodeURIComponent(k)}`)
+        .join('&');
+      url += `?${maskParams}`;
+    }
+
+    const res = await fetch(url, {
+      method: 'PATCH',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ fields })
+    });
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => null);
+      throw new Error(`Firestore setDocument failed: ${err?.error?.message || res.status}`);
+    }
+  }
+
+  async deleteDocument(path: string): Promise<void> {
+    const token = await this.getAuthToken();
+    const cleanPath = path.startsWith('/') ? path.slice(1) : path;
+    const url = `https://firestore.googleapis.com/v1/${this.databasePath}/documents/${cleanPath}`;
+
+    const res = await fetch(url, {
+      method: 'DELETE',
+      headers: {
+        'Authorization': `Bearer ${token}`
+      }
+    });
+
+    if (!res.ok && res.status !== 404) {
+      const err = await res.json().catch(() => null);
+      throw new Error(`Firestore deleteDocument failed: ${err?.error?.message || res.status}`);
+    }
+  }
+
+  async listDocuments(collectionPath: string): Promise<{ id: string; path: string; data: Record<string, any> }[]> {
+    const token = await this.getAuthToken();
+    const cleanCollection = collectionPath.replace(/^\/+|\/+$/g, '');
+    const allDocs: { id: string; path: string; data: Record<string, any> }[] = [];
+    let pageToken: string | undefined;
+
+    do {
+      const params = new URLSearchParams({ pageSize: '300' });
+      if (pageToken) params.set('pageToken', pageToken);
+      const url = `https://firestore.googleapis.com/v1/${this.databasePath}/documents/${cleanCollection}?${params.toString()}`;
+      const res = await fetch(url, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Accept': 'application/json'
+        }
+      });
+
+      if (!res.ok) {
+        if (res.status === 404) break;
+        const err = await res.json().catch(() => null);
+        throw new Error(`Firestore listDocuments failed: ${err?.error?.message || res.status}`);
+      }
+
+      const body = await res.json() as any;
+      const docs = Array.isArray(body?.documents) ? body.documents : [];
+      for (const d of docs) {
+        const nameParts = String(d.name || '').split('/');
+        const id = nameParts[nameParts.length - 1] || '';
+        allDocs.push({
+          id,
+          path: `${cleanCollection}/${id}`,
+          data: fromFirestoreFields(d.fields || {})
+        });
+      }
+      pageToken = body?.nextPageToken;
+    } while (pageToken);
+
+    return allDocs;
   }
 
   async rollback(transactionId: string): Promise<void> {

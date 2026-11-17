@@ -3,9 +3,6 @@ import {
   doc, 
   getDocs, 
   getDoc, 
-  setDoc, 
-  updateDoc, 
-  deleteDoc, 
   onSnapshot 
 } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../firebase';
@@ -210,10 +207,7 @@ export async function fetchAdminSettings(): Promise<StoreSettings> {
 }
 
 export async function updateStoreSettings(newSettings: StoreSettings): Promise<void> {
-  saveLocalSettings(newSettings);
-  const path = 'settings';
-
-  // 1. Server-side authoritative save with admin auth (splits public and private data)
+  // Server-side authoritative save with admin auth (splits public and private data and writes to Firestore)
   const res = await fetch('/api/admin/settings/update', {
     method: 'POST',
     headers: getAdminAuthHeaders(),
@@ -225,14 +219,7 @@ export async function updateStoreSettings(newSettings: StoreSettings): Promise<v
     throw new Error(errData?.error || 'خطا در ذخیره تنظیمات روی سرور');
   }
 
-  // 2. Direct Firestore save to settings/public for real-time customer reflection
-  try {
-    const publicData = extractPublicSettings(newSettings);
-    const docRef = doc(db, path, 'public');
-    await setDoc(docRef, publicData, { merge: true });
-  } catch (error) {
-    console.warn('Direct Firestore public settings update notice:', error);
-  }
+  saveLocalSettings(newSettings);
 }
 
 // Fetch products from authoritative server storage & Firestore
@@ -291,135 +278,107 @@ export function sanitizeForFirestore<T extends Record<string, any>>(obj: T): Rec
 export async function saveProduct(product: Product): Promise<void> {
   // Clean product of any undefined fields
   const cleanProduct = sanitizeForFirestore(product) as Product;
-  let savedOnServer = false;
 
-  // 1. Server-side authoritative write with admin auth
-  try {
-    const res = await fetch('/api/admin/products/save', {
-      method: 'POST',
-      headers: getAdminAuthHeaders(),
-      body: JSON.stringify(cleanProduct),
-    });
-    if (res.ok) {
-      savedOnServer = true;
-    } else {
-      const errData = await res.json().catch(() => null);
-      if (errData?.error) throw new Error(errData.error);
-    }
-  } catch (err: any) {
-    if (err.message && !err.message.includes('Failed to fetch')) {
-      throw err;
-    }
+  // Server-side authoritative write with admin JWT auth
+  const res = await fetch('/api/admin/products/save', {
+    method: 'POST',
+    headers: getAdminAuthHeaders(),
+    body: JSON.stringify(cleanProduct),
+  });
+
+  if (!res.ok) {
+    const errData = await res.json().catch(() => null);
+    throw new Error(errData?.error || 'خطا در ذخیره محصول در پایگاه داده.');
   }
 
-  // 2. Direct client-side Firestore write for real-time propagation
-  const path = 'products';
-  try {
-    await setDoc(doc(db, path, cleanProduct.id), cleanProduct);
-  } catch (error: any) {
-    if (!savedOnServer) {
-      throw new Error('خطا در ذخیره محصول در پایگاه داده: ' + (error?.message || error));
-    }
-  }
+  const data = await res.json().catch(() => null);
+  const savedProduct = (data?.product as Product) || cleanProduct;
 
-  // Update local cache upon verified save
+  // Update local cache upon verified server save
   const current = getLocalProducts();
-  const index = current.findIndex(p => p.id === cleanProduct.id);
+  const index = current.findIndex(p => p.id === savedProduct.id);
   let updated: Product[];
   if (index >= 0) {
     updated = [...current];
-    updated[index] = cleanProduct;
+    updated[index] = savedProduct;
   } else {
-    updated = [cleanProduct, ...current];
+    updated = [savedProduct, ...current];
   }
   saveLocalProducts(updated);
 }
 
 export async function deleteProduct(productId: string): Promise<void> {
-  let deletedOnServer = false;
+  // Server-side delete with admin JWT auth
+  const res = await fetch('/api/admin/products/delete', {
+    method: 'POST',
+    headers: getAdminAuthHeaders(),
+    body: JSON.stringify({ productId }),
+  });
 
-  // 1. Server-side delete with admin auth
-  try {
-    const res = await fetch('/api/admin/products/delete', {
-      method: 'POST',
-      headers: getAdminAuthHeaders(),
-      body: JSON.stringify({ productId }),
-    });
-    if (res.ok) {
-      deletedOnServer = true;
-    } else {
-      const errData = await res.json().catch(() => null);
-      if (errData?.error) throw new Error(errData.error);
-    }
-  } catch (err: any) {
-    if (err.message && !err.message.includes('Failed to fetch')) {
-      throw err;
-    }
+  if (!res.ok) {
+    const errData = await res.json().catch(() => null);
+    throw new Error(errData?.error || 'خطا در حذف محصول از پایگاه داده.');
   }
 
-  // 2. Direct Firestore delete
-  const path = 'products';
-  try {
-    await deleteDoc(doc(db, path, productId));
-  } catch (error: any) {
-    if (!deletedOnServer) {
-      throw new Error('خطا در حذف محصول از پایگاه داده: ' + (error?.message || error));
-    }
-  }
-
-  // Update local
+  // Update local cache upon verified server delete
   const current = getLocalProducts();
   saveLocalProducts(current.filter(p => p.id !== productId));
 }
 
+// Bulk sync products via authenticated server endpoint
+export async function syncProducts(products: Product[], replaceAll: boolean = false): Promise<Product[]> {
+  const cleanList = products.map(p => sanitizeForFirestore(p) as Product);
+  const res = await fetch('/api/admin/products/sync', {
+    method: 'POST',
+    headers: getAdminAuthHeaders(),
+    body: JSON.stringify({ products: cleanList, replaceAll }),
+  });
+
+  if (!res.ok) {
+    const errData = await res.json().catch(() => null);
+    throw new Error(errData?.error || 'خطا در همگام‌سازی دسته‌ای محصولات.');
+  }
+
+  const data = await res.json().catch(() => null);
+  const synced = Array.isArray(data?.products) ? (data.products as Product[]) : cleanList;
+  saveLocalProducts(synced);
+  return synced;
+}
+
 // Clear all products (wiping demo catalog in 1 click)
 export async function clearAllProducts(): Promise<void> {
-  const current = getLocalProducts();
-  saveLocalProducts([]);
-  localStorage.setItem(LS_CATALOG_INIT_FLAG, 'true');
-
-  fetch('/api/admin/products/clear', {
+  const res = await fetch('/api/admin/products/clear', {
     method: 'POST',
     headers: getAdminAuthHeaders()
-  }).catch(() => {});
+  });
 
-  const path = 'products';
-  try {
-    for (const prod of current) {
-      await deleteDoc(doc(db, path, prod.id)).catch(() => {});
-    }
-  } catch (error) {
-    console.warn('Notice while clearing products:', error);
+  if (!res.ok) {
+    const errData = await res.json().catch(() => null);
+    throw new Error(errData?.error || 'خطا در پاک‌سازی کاتالوگ محصولات.');
   }
+
+  saveLocalProducts([]);
+  localStorage.setItem(LS_CATALOG_INIT_FLAG, 'true');
 }
 
 // Restore default sample products
 export async function resetSampleProducts(): Promise<Product[]> {
-  try {
-    const res = await fetch('/api/admin/products/reset-samples', {
-      method: 'POST',
-      headers: getAdminAuthHeaders()
-    });
-    if (res.ok) {
-      const data = await res.json();
-      if (data?.products) {
-        saveLocalProducts(data.products);
-        return data.products;
-      }
-    }
-  } catch (e) {}
+  const res = await fetch('/api/admin/products/reset-samples', {
+    method: 'POST',
+    headers: getAdminAuthHeaders(),
+    body: JSON.stringify({ products: DEFAULT_PRODUCTS })
+  });
 
-  saveLocalProducts(DEFAULT_PRODUCTS);
-  localStorage.setItem(LS_CATALOG_INIT_FLAG, 'true');
-  const path = 'products';
-  try {
-    for (const prod of DEFAULT_PRODUCTS) {
-      await setDoc(doc(db, path, prod.id), prod).catch(() => {});
-    }
-  } catch (error) {
-    console.warn('Notice while resetting sample products:', error);
+  if (!res.ok) {
+    const errData = await res.json().catch(() => null);
+    throw new Error(errData?.error || 'خطا در بازنشانی کاتالوگ محصولات.');
   }
-  return DEFAULT_PRODUCTS;
+
+  const data = await res.json().catch(() => null);
+  const finalProducts = Array.isArray(data?.products) ? (data.products as Product[]) : DEFAULT_PRODUCTS;
+  saveLocalProducts(finalProducts);
+  localStorage.setItem(LS_CATALOG_INIT_FLAG, 'true');
+  return finalProducts;
 }
 
 // Fetch Orders (strictly restricted to Admin)
@@ -467,69 +426,28 @@ export async function fetchOrders(): Promise<Order[]> {
 
 // Delete an order permanently (Admin only)
 export async function deleteOrder(orderId: string): Promise<void> {
-  let serverDeleted = false;
+  const res = await fetch('/api/admin/orders/delete', {
+    method: 'POST',
+    headers: getAdminAuthHeaders(),
+    body: JSON.stringify({ orderId }),
+  });
 
-  // 1. Server-side delete with admin auth
-  try {
-    const res = await fetch('/api/admin/orders/delete', {
-      method: 'POST',
-      headers: getAdminAuthHeaders(),
-      body: JSON.stringify({ orderId }),
-    });
-    if (res.ok) {
-      serverDeleted = true;
-    } else {
-      const errData = await res.json().catch(() => null);
-      if (errData?.error) throw new Error(errData.error);
-    }
-  } catch (err: any) {
-    if (err.message && !err.message.includes('Failed to fetch')) {
-      throw err;
-    }
-  }
-
-  // 2. Direct Firestore delete
-  const path = 'orders';
-  try {
-    await deleteDoc(doc(db, path, orderId));
-  } catch (error: any) {
-    if (!serverDeleted) {
-      throw new Error('خطا در حذف سفارش از پایگاه داده: ' + (error?.message || error));
-    }
+  if (!res.ok) {
+    const errData = await res.json().catch(() => null);
+    throw new Error(errData?.error || 'خطا در حذف سفارش از پایگاه داده.');
   }
 }
 
 // Clear all orders (Admin only)
 export async function clearAllOrders(): Promise<void> {
-  let serverCleared = false;
+  const res = await fetch('/api/admin/orders/clear', {
+    method: 'POST',
+    headers: getAdminAuthHeaders()
+  });
 
-  try {
-    const res = await fetch('/api/admin/orders/clear', {
-      method: 'POST',
-      headers: getAdminAuthHeaders()
-    });
-    if (res.ok) {
-      serverCleared = true;
-    } else {
-      const errData = await res.json().catch(() => null);
-      if (errData?.error) throw new Error(errData.error);
-    }
-  } catch (err: any) {
-    if (err.message && !err.message.includes('Failed to fetch')) {
-      throw err;
-    }
-  }
-
-  const path = 'orders';
-  try {
-    const snap = await getDocs(collection(db, path));
-    for (const d of snap.docs) {
-      await deleteDoc(doc(db, path, d.id)).catch(() => {});
-    }
-  } catch (error: any) {
-    if (!serverCleared) {
-      throw new Error('خطا در پاک‌سازی سفارشات: ' + (error?.message || error));
-    }
+  if (!res.ok) {
+    const errData = await res.json().catch(() => null);
+    throw new Error(errData?.error || 'خطا در پاک‌سازی سفارشات.');
   }
 }
 
@@ -637,46 +555,22 @@ export async function updateOrderStatus(
     refundAmount?: number;
   }
 ): Promise<void> {
-  let serverUpdated = false;
+  const res = await fetch('/api/admin/orders/update', {
+    method: 'POST',
+    headers: getAdminAuthHeaders(),
+    body: JSON.stringify({ 
+      orderId, 
+      status, 
+      trackingCode: extras?.trackingCode,
+      refundNotes: extras?.refundNotes,
+      refundStatus: extras?.refundStatus,
+      refundAmount: extras?.refundAmount,
+    }),
+  });
 
-  // 1. Server-side update with admin auth
-  try {
-    const res = await fetch('/api/admin/orders/update', {
-      method: 'POST',
-      headers: getAdminAuthHeaders(),
-      body: JSON.stringify({ 
-        orderId, 
-        status, 
-        trackingCode: extras?.trackingCode,
-        refundNotes: extras?.refundNotes,
-        refundStatus: extras?.refundStatus,
-        refundAmount: extras?.refundAmount,
-      }),
-    });
-    if (res.ok) {
-      serverUpdated = true;
-    } else {
-      const errData = await res.json().catch(() => null);
-      if (errData?.error) throw new Error(errData.error);
-    }
-  } catch (err: any) {
-    if (err.message && !err.message.includes('Failed to fetch')) {
-      throw err;
-    }
-  }
-
-  // 2. Direct Firestore update
-  const path = 'orders';
-  try {
-    await updateDoc(doc(db, path, orderId), {
-      status,
-      ...extras,
-      updatedAt: new Date().toISOString()
-    });
-  } catch (error: any) {
-    if (!serverUpdated) {
-      throw new Error('خطا در بروزرسانی وضعیت سفارش در پایگاه داده: ' + (error?.message || error));
-    }
+  if (!res.ok) {
+    const errData = await res.json().catch(() => null);
+    throw new Error(errData?.error || 'خطا در بروزرسانی وضعیت سفارش در پایگاه داده.');
   }
 }
 

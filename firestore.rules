@@ -36,9 +36,10 @@ service cloud.firestore {
 
     // 2. Products catalog
     // Read: public (anyone can view store products)
-    // Write: synchronized with authoritative store administration
+    // Write: strictly restricted to admin (no public writes)
     match /products/{productId} {
-      allow read, write: if true;
+      allow read: if true;
+      allow write: if isAdmin();
     }
 
     // 3. Customer orders
@@ -61,8 +62,10 @@ service cloud.firestore {
 
     // 4. Store settings
     // Public store info: store name, working hours, shipping costs, banners, social links, CMS texts
+    // Read: public, Write: strictly restricted to admin (no public writes)
     match /settings/public {
-      allow read, write: if true;
+      allow read: if true;
+      allow write: if isAdmin();
     }
 
     // Private settings: banking info, ntfy topics, admin configs, credentials

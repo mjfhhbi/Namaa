@@ -52,8 +52,6 @@ import {
 import { sendNtfyNotification, fetchAdminSettings, resendOrderNotification } from '../services/storeService';
 import { DEFAULT_STORE_SETTINGS as DEFAULT_SETTINGS, PRESET_PRODUCT_IMAGES as PRESET_IMAGE_OPTIONS } from '../types';
 import { compressImage } from '../utils/imageCompressor';
-import { doc, setDoc } from 'firebase/firestore';
-import { db } from '../firebase';
 import namaLogoImg from '../assets/images/nama_store_logo_1791976961130.webp';
 
 interface AdminModalProps {
