@@ -10,7 +10,6 @@ import {
   KeyRound, 
   Sparkles
 } from 'lucide-react';
-import { PWAInstallButton } from './PWAInstallButton';
 
 interface HeaderProps {
   settings: StoreSettings;
@@ -83,11 +82,8 @@ export const Header: React.FC<HeaderProps> = ({
           )}
         </div>
 
-        {/* Action Buttons: PWA Install, Music, Tracking, Admin, Cart */}
+        {/* Action Buttons: Music, Tracking, Admin, Cart */}
         <div className="flex items-center gap-1.5 sm:gap-2.5 shrink-0">
-          {/* PWA Install Button */}
-          <PWAInstallButton variant="header" />
-
           {/* 1. Ambient Music Toggle */}
           <AudioPlayer />
 
